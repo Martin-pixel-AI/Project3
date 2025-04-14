@@ -1,117 +1,68 @@
-# Truespace - Educational Video Platform
+# TrueSpace Learning Platform
 
-Truespace is an educational platform that provides access to video courses through promo codes. It's built with a modern tech stack including Next.js, React, TypeScript, Tailwind CSS, and MongoDB.
+Образовательная платформа для размещения и доступа к онлайн-курсам с видео, документами и промокодами для управления доступом.
 
-## Features
+## Функциональность
 
-- 🔒 Secure authentication system
-- 🎟️ Promo code-based access to premium content
-- 📚 Course catalog with video playback
-- ❤️ Favorites system for saved courses
-- 🔍 Search and filter functionality
-- 👤 User profiles
-- 📱 Responsive design for all devices
-- 🎨 Dark mode UI
+- Регистрация и авторизация пользователей
+- Админ-панель для создания и управления курсами
+- Система промокодов для предоставления доступа к курсам
+- Страница профиля пользователя с доступными курсами
+- Статистика и аналитика использования платформы
 
-## Tech Stack
+## Требования
 
-- **Frontend**: Next.js, React, TypeScript, Tailwind CSS, Framer Motion
-- **Backend**: Next.js API Routes
-- **Database**: MongoDB with Mongoose
-- **Authentication**: JWT (JSON Web Tokens)
+- Node.js 16+ и npm/yarn
+- MongoDB
 
-## Getting Started
+## Установка и настройка
 
-### Prerequisites
-
-- Node.js (v14 or newer)
-- npm or yarn
-- MongoDB database (local or Atlas)
-
-### Installation
-
-1. Clone the repository
-   ```bash
-   git clone https://github.com/yourusername/truespace.git
-   cd truespace
-   ```
-
-2. Install dependencies
-   ```bash
-   npm install
-   # or
-   yarn
-   ```
-
-3. Create a `.env.local` file in the root directory with the following variables:
-   ```
-   MONGODB_URI=your_mongodb_uri
-   JWT_SECRET=your_jwt_secret
-   ```
-
-4. Start the development server
-   ```bash
-   npm run dev
-   # or
-   yarn dev
-   ```
-
-5. Open [http://localhost:3000](http://localhost:3000) in your browser
-
-## Deployment on Render
-
-1. Create a new Web Service on Render
-2. Connect your GitHub repository
-3. Configure the service:
-   - **Build Command**: `npm install && npm run build`
-   - **Start Command**: `npm start`
-   - **Environment Variables**: Add `MONGODB_URI` and `JWT_SECRET`
-4. Deploy the service
-
-## Project Structure
-
-```
-truespace/
-├── src/
-│   ├── app/             # Next.js App Router
-│   │   ├── api/         # API routes
-│   │   ├── auth/        # Authentication pages
-│   │   ├── courses/     # Course pages
-│   │   ├── profile/     # User profile pages
-│   │   ├── favorites/   # Favorites pages
-│   │   └── admin/       # Admin panel
-│   ├── components/      # React components
-│   │   ├── auth/        # Authentication components
-│   │   ├── courses/     # Course-related components
-│   │   ├── navigation/  # Navigation components
-│   │   └── ui/          # UI components
-│   ├── lib/             # Utility functions
-│   ├── models/          # Mongoose models
-│   └── hooks/           # Custom React hooks
-├── public/              # Static files
-└── ...
+1. Клонируйте репозиторий:
+```bash
+git clone https://github.com/ваш-username/truespace.git
+cd truespace
 ```
 
-## Database Schema
+2. Установите зависимости:
+```bash
+npm install
+# или
+yarn install
+```
 
-The application uses the following MongoDB collections:
+3. Создайте файл `.env.local` на основе примера:
+```bash
+cp .env.example .env.local
+```
 
-- **users**: User accounts with authentication
-- **courses**: Course information
-- **videos**: Video content linked to courses
-- **promoCodes**: Promo codes for course access
-- **admins**: Administrator accounts
+4. Отредактируйте `.env.local`, указав ваши значения:
+- Установите надежный JWT_SECRET
+- Добавьте другие переменные среды при необходимости
 
-## Promo Code System
+5. Запустите приложение в режиме разработки:
+```bash
+npm run dev
+# или
+yarn dev
+```
 
-The promo code system works as follows:
+6. Откройте [http://localhost:3000](http://localhost:3000) в браузере
 
-1. Administrators generate promo codes with specific permissions
-2. Each promo code can grant access to one or more courses
-3. Promo codes can have expiration dates and usage limits
-4. Users enter promo codes in their profile to unlock content
-5. Once a course is unlocked, it remains available in the user's account
+## Доступ к админ-панели
 
-## License
+1. Перейдите на страницу `/admin/register`
+2. Заполните форму регистрации, используя секретный ключ: `truespace-admin-secret-key`
+3. После регистрации вы будете автоматически авторизованы и перенаправлены в админ-панель
 
-This project is licensed under the ISC License. 
+## Структура проекта
+
+- `/src/app` - Next.js приложение, страницы и API маршруты
+- `/src/components` - React-компоненты
+- `/src/lib` - Вспомогательные функции и утилиты
+- `/src/models` - Mongoose модели для работы с MongoDB
+
+## Безопасность
+
+- Убедитесь, что вы изменили JWT_SECRET в файле `.env.local`
+- Смените admin-secret-key для повышения безопасности
+- Не публикуйте `.env.local` или другие конфиденциальные файлы в публичных репозиториях 
