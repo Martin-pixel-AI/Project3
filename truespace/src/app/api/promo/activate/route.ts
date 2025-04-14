@@ -44,6 +44,9 @@ async function handler(req: NextRequest) {
       return NextResponse.json({ error: 'Promo code is expired or has reached maximum uses' }, { status: 400 });
     }
     
+    // Увеличиваем таймаут для MongoDb операций
+    mongoose.connection.setMaxListeners(50);
+
     // Find user
     const user = await User.findById(userId);
     if (!user) {
@@ -56,6 +59,14 @@ async function handler(req: NextRequest) {
       console.log('Initializing empty activatedCourses array for user:', userId);
       user.activatedCourses = [];
     }
+
+    // Получаем информацию о курсах из промокода
+    const Course = mongoose.model('Course');
+    const coursesToActivate = await Course.find({
+      _id: { $in: promoCode.courseIds }
+    }).select('_id title');
+
+    console.log('Courses to activate:', coursesToActivate.map(c => ({ id: c._id.toString(), title: c.title })));
     
     // Explicit conversion of ObjectId to strings for reliable comparison
     const userActivatedCoursesStrings = user.activatedCourses.map(
@@ -77,42 +88,69 @@ async function handler(req: NextRequest) {
     );
     
     console.log('Courses to add:', coursesToAddStrings);
+
+    if (coursesToAddStrings.length === 0) {
+      console.log('User already has access to all courses in this promo code');
+      return NextResponse.json({ 
+        message: 'You already have access to all courses in this promo code',
+        activatedCourses: userActivatedCoursesStrings,
+        alreadyActivated: true
+      });
+    }
     
     // Convert string IDs back to ObjectId for storage
     const coursesToAdd = coursesToAddStrings.map(
       (courseIdString: string) => new mongoose.Types.ObjectId(courseIdString)
     );
     
-    // Add to user's activated courses
-    user.activatedCourses = [...user.activatedCourses, ...coursesToAdd];
-    user.promoCode = code; // Save the last used promo code
+    // Add courses directly using $addToSet to avoid duplicates
+    const updateResult = await User.updateOne(
+      { _id: userId },
+      { 
+        $addToSet: { activatedCourses: { $each: coursesToAdd } },
+        $set: { promoCode: code } // Save the last used promo code
+      }
+    );
     
-    // Log the final state before saving
+    console.log('User update result:', updateResult);
+
+    // Запрашиваем обновленную информацию пользователя чтобы убедиться, что данные сохранились
+    const updatedUser = await User.findById(userId);
+    const updatedActivatedCourses = updatedUser?.activatedCourses?.map(
+      (id: mongoose.Types.ObjectId) => id.toString()
+    ) || [];
+
+    // Проверяем, были ли фактически добавлены курсы
+    const actuallyAdded = coursesToAddStrings.filter(
+      (courseId: string) => updatedActivatedCourses.includes(courseId)
+    );
+
+    console.log('Actually added courses:', actuallyAdded);
+    
+    // Log the final state 
     console.log('Final activatedCourses state:', {
-      activatedCourses: user.activatedCourses.map((id: mongoose.Types.ObjectId) => id.toString()),
-      count: user.activatedCourses.length
+      activatedCourses: updatedActivatedCourses,
+      count: updatedActivatedCourses.length,
+      actuallyAddedCount: actuallyAdded.length
     });
     
-    // Save changes to user
-    const savedUser = await user.save();
-    
-    console.log('User saved successfully with updated courses');
-    
-    // Increment promo code uses
-    promoCode.uses += 1;
-    await promoCode.save();
-    
-    console.log('Promo code uses incremented and saved');
+    // Increment promo code uses only if at least one course was added
+    if (actuallyAdded.length > 0) {
+      promoCode.uses += 1;
+      await promoCode.save();
+      console.log('Promo code uses incremented and saved');
+    }
     
     // Return detailed success response
     return NextResponse.json({ 
       message: 'Promo code activated successfully',
-      activatedCourses: savedUser.activatedCourses.map((id: mongoose.Types.ObjectId) => id.toString()),
-      activatedCoursesCount: savedUser.activatedCourses.length,
+      activatedCourses: updatedActivatedCourses,
+      activatedCoursesCount: updatedActivatedCourses.length,
       promoCodeCourses: promoCodeCourseIdStrings,
       promoCodeCoursesCount: promoCodeCourseIdStrings.length,
-      coursesAdded: coursesToAddStrings,
-      coursesAddedCount: coursesToAddStrings.length
+      coursesAdded: actuallyAdded,
+      coursesAddedCount: actuallyAdded.length,
+      courses: coursesToActivate.map(c => ({ id: c._id.toString(), title: c.title }))
     });
     
   } catch (error: any) {

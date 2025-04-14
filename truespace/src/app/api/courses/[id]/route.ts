@@ -100,7 +100,18 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
       courseId: id, 
       userActivatedCourses: userActivatedCoursesStrings, 
       userActivatedCoursesCount: userActivatedCoursesStrings.length,
-      hasAccess 
+      hasAccess,
+      // Добавляем типы данных для отладки
+      courseIdType: typeof id,
+      activatedCoursesTypes: userActivatedCoursesStrings.map((courseId: string) => typeof courseId),
+      // Дополнительная информация
+      userInfo: {
+        email: user.email,
+        promoCode: user.promoCode,
+        activatedCoursesRaw: user.activatedCourses
+      },
+      // Прямая проверка на точное совпадение
+      exactMatches: userActivatedCoursesStrings.filter((courseId: string) => courseId === id)
     });
     
     if (!hasAccess) {
@@ -125,100 +136,84 @@ export const POST = withAuth(getFullCourse);
 
 // Удаление курса (только для администратора)
 async function deleteCourse(req: NextRequest, { params }: Params) {
-  const session = await mongoose.startSession();
-  
   try {
     await dbConnect();
     
     const { id } = params;
     const userData = (req as any).user;
     
-    console.log('DELETE course request:', { courseId: id, userId: userData.id });
-    
     // Проверяем, что пользователь - администратор
     if (userData.type !== 'admin') {
-      console.log('Access denied: user is not admin');
       return NextResponse.json({ 
         error: 'Только администраторы могут удалять курсы' 
       }, { status: 403 });
     }
     
-    // Находим курс и его видео перед удалением
+    // Находим курс с его видео для дальнейшего удаления
     const course = await Course.findById(id).populate('videos');
     
     if (!course) {
-      console.log('Course not found:', id);
       return NextResponse.json({ error: 'Курс не найден' }, { status: 404 });
     }
     
-    console.log('Course found for deletion:', { 
-      courseId: id, 
-      title: course.title,
-      videosCount: course.videos?.length || 0
-    });
+    // Получаем ID всех видео курса для удаления
+    const videoIds = course.videos?.map((video: any) => video._id) || [];
     
-    // Используем транзакцию для удаления курса и всех связанных данных
-    await session.startTransaction();
-    
-    try {
-      // Получаем ID всех видео курса
-      const videoIds = course.videos?.map((video: any) => video._id) || [];
-      console.log('Video IDs to delete:', videoIds);
-      
-      // Удаляем видео курса
-      if (videoIds.length > 0) {
+    // Шаг 1: Удаляем все видео курса
+    if (videoIds.length > 0) {
+      try {
         const VideoModel = mongoose.model('Video');
-        const deleteVideosResult = await VideoModel.deleteMany({ 
+        await VideoModel.deleteMany({ 
           _id: { $in: videoIds } 
-        }).session(session);
-        
-        console.log('Videos deletion result:', deleteVideosResult);
+        });
+      } catch (videoDeletionError) {
+        console.error('Error deleting videos:', videoDeletionError);
+        // Продолжаем удаление даже при ошибке с видео
       }
-      
-      // Удаляем курс
-      const deleteCourseResult = await Course.findByIdAndDelete(id).session(session);
-      console.log('Course deletion result:', !!deleteCourseResult);
-      
-      // Удаляем курс из списка активированных у пользователей
-      const updateActivatedResult = await User.updateMany(
+    }
+    
+    // Шаг 2: Удаляем курс из активированных курсов пользователей
+    try {
+      await User.updateMany(
         { activatedCourses: id }, 
         { $pull: { activatedCourses: id } }
-      ).session(session);
-      
-      console.log('Users activated courses update result:', updateActivatedResult);
-      
-      // Удаляем курс из избранного у пользователей
-      const updateFavoritesResult = await User.updateMany(
+      );
+    } catch (activatedCoursesError) {
+      console.error('Error removing course from activated courses:', activatedCoursesError);
+      // Продолжаем удаление даже при ошибке
+    }
+    
+    // Шаг 3: Удаляем курс из избранного пользователей
+    try {
+      await User.updateMany(
         { favorites: id }, 
         { $pull: { favorites: id } }
-      ).session(session);
-      
-      console.log('Users favorites update result:', updateFavoritesResult);
-      
-      await session.commitTransaction();
-      console.log('Transaction committed successfully');
-      
-      return NextResponse.json({ 
-        message: 'Курс успешно удален',
-        deletedCourseId: id,
-        title: course.title,
-        videosDeleted: videoIds.length
-      });
-    } catch (error: any) {
-      await session.abortTransaction();
-      console.error('Transaction error during course deletion:', error);
-      return NextResponse.json({ 
-        error: error.message || 'Ошибка при удалении курса' 
-      }, { status: 500 });
-    } 
+      );
+    } catch (favoritesError) {
+      console.error('Error removing course from favorites:', favoritesError);
+      // Продолжаем удаление даже при ошибке
+    }
     
+    // Шаг 4: Удаляем сам курс
+    try {
+      await Course.findByIdAndDelete(id);
+    } catch (courseDeletionError) {
+      console.error('Error deleting course:', courseDeletionError);
+      return NextResponse.json({ 
+        error: 'Не удалось удалить курс' 
+      }, { status: 500 });
+    }
+    
+    return NextResponse.json({ 
+      message: 'Курс успешно удален',
+      deletedCourseId: id,
+      title: course.title
+    });
   } catch (error: any) {
     console.error('Error deleting course:', error);
     return NextResponse.json({ 
       error: error.message || 'Не удалось удалить курс' 
     }, { status: 500 });
-  } finally {
-    session.endSession();
   }
 }
 
@@ -226,19 +221,14 @@ export const DELETE = withAuth(deleteCourse);
 
 // Обновление курса (только для администратора)
 async function updateCourse(req: NextRequest, { params }: Params) {
-  const session = await mongoose.startSession();
-  
   try {
     await dbConnect();
     
     const { id } = params;
     const userData = (req as any).user;
     
-    console.log('PUT course request:', { courseId: id, userId: userData.id });
-    
     // Проверяем, что пользователь - администратор
     if (userData.type !== 'admin') {
-      console.log('Access denied: user is not admin');
       return NextResponse.json({ 
         error: 'Только администраторы могут обновлять курсы' 
       }, { status: 403 });
@@ -246,16 +236,12 @@ async function updateCourse(req: NextRequest, { params }: Params) {
     
     // Получаем данные из запроса
     const reqText = await req.text();
-    
-    // Проверяем, не пустой ли запрос
     if (!reqText || reqText.trim() === '') {
       console.error('Empty request body');
       return NextResponse.json({ 
         error: 'Тело запроса пустое' 
       }, { status: 400 });
     }
-    
-    console.log('Request body text:', reqText.substring(0, 200) + '...');
     
     // Парсим JSON с обработкой ошибок
     let body;
@@ -264,23 +250,14 @@ async function updateCourse(req: NextRequest, { params }: Params) {
     } catch (parseError) {
       console.error('Failed to parse request JSON:', parseError);
       return NextResponse.json({ 
-        error: 'Невозможно разобрать JSON' 
+        error: 'Невозможно разобрать JSON. Ошибка: ' + (parseError as Error).message
       }, { status: 400 });
     }
     
     const { title, description, category, tags, thumbnail, videos } = body;
     
-    console.log('Course update data:', {
-      title,
-      description: description?.substring(0, 50) + '...',
-      category,
-      tagsCount: tags?.length,
-      videosCount: videos?.length
-    });
-    
     // Проверка обязательных полей
     if (!title || !description || !category) {
-      console.log('Missing required fields');
       return NextResponse.json({ 
         error: 'Название, описание и категория обязательны для заполнения' 
       }, { status: 400 });
@@ -288,67 +265,50 @@ async function updateCourse(req: NextRequest, { params }: Params) {
     
     // Находим курс
     const course = await Course.findById(id);
-    
     if (!course) {
-      console.log('Course not found:', id);
       return NextResponse.json({ error: 'Курс не найден' }, { status: 404 });
     }
     
-    console.log('Course found for update:', {
-      id: course._id,
-      title: course.title
-    });
+    // Обновляем основные данные курса
+    course.title = title;
+    course.description = description;
+    course.category = category;
+    course.tags = tags || [];
     
-    // Используем транзакцию для обновления курса и видео
-    await session.startTransaction();
+    if (thumbnail) {
+      course.thumbnail = thumbnail;
+    }
     
-    try {
-      // Обновляем основные данные курса
-      course.title = title;
-      course.description = description;
-      course.category = category;
-      course.tags = tags || [];
+    // Сохраняем изменения курса
+    await course.save();
+    
+    // Обрабатываем видео без использования сессии
+    // Сначала видео с ID (существующие)
+    if (videos && videos.length > 0) {
+      const existingVideos = videos.filter((v: any) => v._id);
+      const newVideos = videos.filter((v: any) => !v._id);
       
-      if (thumbnail) {
-        course.thumbnail = thumbnail;
-      }
-      
-      const savedCourse = await course.save({ session });
-      console.log('Course basic data updated');
-      
-      // Обновляем видео, если они предоставлены
-      if (videos && videos.length > 0) {
-        // Отфильтровываем видео с ID (существующие) и без ID (новые)
-        const existingVideos = videos.filter((v: any) => v._id);
-        const newVideos = videos.filter((v: any) => !v._id);
-        
-        console.log('Videos to update:', {
-          existingCount: existingVideos.length,
-          newCount: newVideos.length
-        });
-        
-        // Обновляем существующие видео
-        for (const video of existingVideos) {
-          const updateResult = await mongoose.model('Video').findByIdAndUpdate(
+      // Обновляем существующие видео по одному
+      for (const video of existingVideos) {
+        try {
+          await mongoose.model('Video').findByIdAndUpdate(
             video._id,
             {
               title: video.title,
               youtubeUrl: video.youtubeUrl,
               duration: video.duration,
               description: video.description
-            },
-            { new: true }
-          ).session(session);
-          
-          if (!updateResult) {
-            console.warn('Failed to update video:', video._id);
-          }
+            }
+          );
+        } catch (updateError) {
+          console.error('Error updating video:', video._id, updateError);
         }
-        
-        console.log('Existing videos updated');
-        
-        // Создаем новые видео и привязываем к курсу
-        if (newVideos.length > 0) {
+      }
+      
+      // Создаем новые видео, если есть
+      if (newVideos.length > 0) {
+        try {
+          const VideoModel = mongoose.model('Video');
           const videosToCreate = newVideos.map((v: any) => ({
             title: v.title,
             youtubeUrl: v.youtubeUrl,
@@ -357,57 +317,35 @@ async function updateCourse(req: NextRequest, { params }: Params) {
             courseId: course._id
           }));
           
-          const VideoModel = mongoose.model('Video');
-          const createdVideos = await VideoModel.create(
-            videosToCreate,
-            { session }
-          );
-          
-          console.log('New videos created:', createdVideos.length);
+          const createdVideos = await VideoModel.create(videosToCreate);
           
           // Добавляем новые видео к списку видео курса
           const videoIds = createdVideos.map((v: any) => v._id);
           course.videos = [...course.videos, ...videoIds];
-          await course.save({ session });
-          
-          console.log('Added new videos to course');
+          await course.save();
+        } catch (createError) {
+          console.error('Error creating new videos:', createError);
         }
       }
-      
-      await session.commitTransaction();
-      console.log('Transaction committed successfully');
-      
-      // Возвращаем обновленный курс
-      const updatedCourse = await Course.findById(id).populate('videos');
-      
-      if (!updatedCourse) {
-        console.error('Failed to fetch updated course after update');
-        return NextResponse.json({ 
-          error: 'Не удалось получить обновленный курс' 
-        }, { status: 500 });
-      }
-      
-      console.log('Returning updated course data');
-      
-      return NextResponse.json({ 
-        message: 'Курс успешно обновлен',
-        course: updatedCourse
-      });
-    } catch (error: any) {
-      await session.abortTransaction();
-      console.error('Transaction error during course update:', error);
-      return NextResponse.json({ 
-        error: error.message || 'Ошибка при обновлении курса' 
-      }, { status: 500 });
-    } 
+    }
     
+    // Получаем обновленный курс с видео для ответа
+    const updatedCourse = await Course.findById(id).populate('videos');
+    if (!updatedCourse) {
+      return NextResponse.json({ 
+        error: 'Не удалось получить обновленный курс' 
+      }, { status: 500 });
+    }
+    
+    return NextResponse.json({ 
+      message: 'Курс успешно обновлен',
+      course: updatedCourse
+    });
   } catch (error: any) {
     console.error('Error updating course:', error);
     return NextResponse.json({ 
       error: error.message || 'Не удалось обновить курс' 
     }, { status: 500 });
-  } finally {
-    session.endSession();
   }
 }
 

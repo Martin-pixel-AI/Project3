@@ -38,41 +38,50 @@ export default function EditCoursePage() {
           return;
         }
         
-        console.log('Fetching course data for editing:', courseId);
+        console.log('Fetching course data for editing ID:', courseId);
         
-        // Получаем полную информацию о курсе
-        const response = await fetch(`/api/courses/${courseId}`, {
+        // Сначала попробуем получить данные через GET запрос (базовая информация о курсе)
+        const basicResponse = await fetch(`/api/courses/${courseId}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        if (!basicResponse.ok) {
+          console.error('Failed to fetch basic course data, status:', basicResponse.status);
+          throw new Error('Не удалось загрузить данные курса. Попробуйте еще раз.');
+        }
+        
+        // Получаем базовую информацию о курсе
+        const basicCourse = await basicResponse.json();
+        
+        if (!basicCourse.course) {
+          throw new Error('Данные курса отсутствуют в ответе');
+        }
+        
+        // Получаем полную информацию о курсе с видео
+        const fullResponse = await fetch(`/api/courses/${courseId}`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`
           }
         });
         
-        // Получаем текст ответа для отладки
-        const responseText = await response.text();
-        console.log('Response text:', responseText);
+        let videosData = [];
         
-        // Преобразуем текст в JSON, если возможно
-        let data;
-        try {
-          data = JSON.parse(responseText);
-        } catch (parseError) {
-          console.error('Failed to parse JSON:', parseError);
-          throw new Error(`Ошибка формата данных: ${responseText.substring(0, 100)}...`);
-        }
-        
-        if (!response.ok) {
-          throw new Error(data.error || 'Не удалось загрузить данные курса');
-        }
-        
-        if (!data.course) {
-          console.error('Course data missing in response:', data);
-          throw new Error('Данные курса отсутствуют в ответе сервера');
+        // Даже если запрос на получение видео не удался, мы все равно используем основную информацию
+        if (fullResponse.ok) {
+          const fullCourseData = await fullResponse.json();
+          if (fullCourseData.course && fullCourseData.course.videos) {
+            videosData = fullCourseData.course.videos;
+          }
+        } else {
+          console.warn('Could not fetch videos, will use basic course data only');
         }
         
         // Заполняем форму данными курса
-        const course = data.course;
-        console.log('Course data received:', course);
+        const course = basicCourse.course;
+        console.log('Course data received:', course.title);
         
         setCourseForm({
           title: course.title || '',
@@ -80,12 +89,12 @@ export default function EditCoursePage() {
           category: course.category || '',
           tags: course.tags ? course.tags.join(', ') : '',
           thumbnail: course.thumbnail || '',
-          videos: course.videos?.length 
-            ? course.videos.map((v: any) => ({
+          videos: videosData.length > 0
+            ? videosData.map((v: any) => ({
                 _id: v._id,
                 title: v.title,
                 youtubeUrl: v.youtubeUrl,
-                duration: v.duration,
+                duration: v.duration || 0,
                 description: v.description || ''
               }))
             : [{ _id: '', title: '', youtubeUrl: '', duration: 0, description: '' }]
@@ -93,7 +102,7 @@ export default function EditCoursePage() {
         
       } catch (err) {
         console.error('Error fetching course:', err);
-        setError(err instanceof Error ? err.message : 'An error occurred');
+        setError(err instanceof Error ? err.message : 'Произошла ошибка при загрузке курса');
       } finally {
         setLoading(false);
       }
@@ -152,15 +161,16 @@ export default function EditCoursePage() {
         throw new Error('Вы не авторизованы');
       }
       
-      console.log('Submitting course update:', courseId);
+      console.log('Submitting course update for ID:', courseId);
       
       // Подготавливаем данные
       const formData = {
         ...courseForm,
-        tags: courseForm.tags.split(',').map(tag => tag.trim()).filter(tag => tag)
+        tags: courseForm.tags ? courseForm.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : []
       };
       
-      console.log('Form data:', formData);
+      const jsonBody = JSON.stringify(formData);
+      console.log('Sending data:', jsonBody.substring(0, 200) + '...');
       
       // Отправляем запрос
       const response = await fetch(`/api/courses/${courseId}`, {
@@ -169,24 +179,25 @@ export default function EditCoursePage() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(formData)
+        body: jsonBody
       });
       
       // Получаем текст ответа для отладки
       const responseText = await response.text();
+      console.log('Response status:', response.status);
       console.log('Response text:', responseText);
       
       // Преобразуем текст в JSON, если возможно
       let data;
       try {
-        data = JSON.parse(responseText);
+        data = responseText ? JSON.parse(responseText) : {};
       } catch (parseError) {
-        console.error('Failed to parse JSON:', parseError);
-        throw new Error(`Ошибка формата данных: ${responseText.substring(0, 100)}...`);
+        console.error('Failed to parse JSON response:', parseError);
+        throw new Error(`Ошибка формата ответа: ${responseText.substring(0, 100)}...`);
       }
       
       if (!response.ok) {
-        throw new Error(data.error || 'Ошибка при обновлении курса');
+        throw new Error(data.error || `Ошибка при обновлении курса (статус: ${response.status})`);
       }
       
       setSuccess('Курс успешно обновлен!');
@@ -194,7 +205,7 @@ export default function EditCoursePage() {
       
     } catch (err) {
       console.error('Error updating course:', err);
-      setError(err instanceof Error ? err.message : 'Произошла ошибка');
+      setError(err instanceof Error ? err.message : `Произошла ошибка: ${String(err)}`);
     } finally {
       setSubmitting(false);
     }
