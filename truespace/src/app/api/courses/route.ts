@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import dbConnect from '../../../lib/db';
 import Course from '../../../models/Course';
+import Video from '../../../models/Video';
 import { withAuth } from '../../../lib/auth';
+import mongoose from 'mongoose';
 
 export async function GET(req: NextRequest) {
   try {
@@ -69,7 +71,7 @@ async function createCourse(req: NextRequest) {
     }
     
     const body = await req.json();
-    const { title, description, category, tags, thumbnail } = body;
+    const { title, description, category, tags, thumbnail, videos } = body;
     
     // Проверка наличия обязательных полей
     if (!title || !description || !category) {
@@ -78,20 +80,70 @@ async function createCourse(req: NextRequest) {
       }, { status: 400 });
     }
     
-    // Создание нового курса
-    const course = await Course.create({
-      title,
-      description,
-      category,
-      tags: tags || [],
-      thumbnail: thumbnail || '',
-      videos: []
-    });
+    // Начинаем сессию MongoDB для атомарных операций
+    const session = await mongoose.startSession();
+    session.startTransaction();
     
-    return NextResponse.json({ 
-      message: 'Курс успешно создан',
-      course
-    }, { status: 201 });
+    try {
+      // Создание нового курса
+      const course = await Course.create([{
+        title,
+        description,
+        category,
+        tags: tags || [],
+        thumbnail: thumbnail || '',
+        videos: []
+      }], { session });
+      
+      const courseId = course[0]._id;
+      
+      // Если есть видео, создаем их
+      const videoIds = [];
+      if (videos && videos.length > 0) {
+        const videoPromises = videos.map(async (video: any, index: number) => {
+          if (!video.title || !video.youtubeUrl) return null;
+          
+          const newVideo = await Video.create([{
+            title: video.title,
+            youtubeUrl: video.youtubeUrl,
+            duration: video.duration || 0,
+            description: video.description || '',
+            tags: tags || [],
+            courseId,
+            order: index
+          }], { session });
+          
+          return newVideo[0]._id;
+        });
+        
+        const createdVideoIds = await Promise.all(videoPromises);
+        const filteredVideoIds = createdVideoIds.filter(id => id !== null);
+        
+        // Обновляем курс с ID видео
+        await Course.findByIdAndUpdate(
+          courseId,
+          { videos: filteredVideoIds },
+          { session }
+        );
+      }
+      
+      // Коммит транзакции
+      await session.commitTransaction();
+      
+      // Получаем полный курс с видео
+      const populatedCourse = await Course.findById(courseId).populate('videos');
+      
+      return NextResponse.json({ 
+        message: 'Курс успешно создан',
+        course: populatedCourse
+      }, { status: 201 });
+    } catch (error) {
+      // В случае ошибки отменяем транзакцию
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
+    }
     
   } catch (error: any) {
     console.error('Ошибка создания курса:', error);

@@ -99,8 +99,12 @@ export default function CourseDetailPage() {
         
         if (userResponse.ok) {
           const userData = await userResponse.json();
-          const favoritesIds = (userData.user.favorites || []).map((fav: any) => fav._id);
-          setIsFavorite(favoritesIds.includes(courseId));
+          // Проверяем, что userData.favorites существует перед использованием
+          const favoritesArray = Array.isArray(userData.favorites) ? userData.favorites : [];
+          setIsFavorite(favoritesArray.some((fav: any) => {
+            // Проверяем, является ли элемент строкой или объектом с _id
+            return typeof fav === 'string' ? fav === courseId : fav && fav._id === courseId;
+          }));
         }
         
       } catch (err) {

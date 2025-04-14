@@ -12,13 +12,18 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   
+  // Состояние для статистики
+  const [stats, setStats] = useState<any>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  
   // Состояние для формы создания курса
   const [courseForm, setCourseForm] = useState({
     title: '',
     description: '',
     category: '',
     tags: '',
-    thumbnail: ''
+    thumbnail: '',
+    videos: [{ title: '', youtubeUrl: '', duration: 0, description: '' }]
   });
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -29,6 +34,34 @@ export default function AdminPage() {
     setCourseForm(prev => ({
       ...prev,
       [name]: value
+    }));
+  };
+  
+  // Обработчик изменения видео
+  const handleVideoChange = (index: number, field: string, value: string | number) => {
+    const updatedVideos = [...courseForm.videos];
+    updatedVideos[index] = { ...updatedVideos[index], [field]: value };
+    setCourseForm(prev => ({
+      ...prev,
+      videos: updatedVideos
+    }));
+  };
+  
+  // Добавление нового видео
+  const addVideo = () => {
+    setCourseForm(prev => ({
+      ...prev,
+      videos: [...prev.videos, { title: '', youtubeUrl: '', duration: 0, description: '' }]
+    }));
+  };
+  
+  // Удаление видео
+  const removeVideo = (index: number) => {
+    const updatedVideos = [...courseForm.videos];
+    updatedVideos.splice(index, 1);
+    setCourseForm(prev => ({
+      ...prev,
+      videos: updatedVideos.length ? updatedVideos : [{ title: '', youtubeUrl: '', duration: 0, description: '' }]
     }));
   };
   
@@ -74,7 +107,8 @@ export default function AdminPage() {
         description: '',
         category: '',
         tags: '',
-        thumbnail: ''
+        thumbnail: '',
+        videos: [{ title: '', youtubeUrl: '', duration: 0, description: '' }]
       });
       
       setSuccess('Курс успешно создан!');
@@ -83,6 +117,36 @@ export default function AdminPage() {
       setFormError(err instanceof Error ? err.message : 'Произошла ошибка');
     } finally {
       setFormLoading(false);
+    }
+  };
+  
+  // Загрузка статистики
+  const loadStats = async () => {
+    try {
+      setStatsLoading(true);
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        throw new Error('Вы не авторизованы');
+      }
+      
+      const response = await fetch('/api/stats', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось загрузить статистику');
+      }
+      
+      setStats(data);
+    } catch (err) {
+      console.error('Error loading stats:', err);
+    } finally {
+      setStatsLoading(false);
     }
   };
   
@@ -113,6 +177,9 @@ export default function AdminPage() {
           router.push('/'); // Перенаправляем на главную, если пользователь не админ
           return;
         }
+        
+        // Загружаем статистику после успешной авторизации
+        await loadStats();
         
       } catch (err) {
         console.error('Error checking admin auth:', err);
@@ -255,6 +322,92 @@ export default function AdminPage() {
                 />
               </div>
               
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Видео курса
+                </label>
+                <div className="space-y-4">
+                  {courseForm.videos.map((video, index) => (
+                    <div key={index} className="p-3 border border-gray-600 rounded-lg space-y-2">
+                      <div className="flex justify-between">
+                        <h4 className="font-medium">Видео {index + 1}</h4>
+                        <button 
+                          type="button"
+                          onClick={() => removeVideo(index)}
+                          className="text-red-400 hover:text-red-500"
+                        >
+                          Удалить
+                        </button>
+                      </div>
+                      
+                      <div>
+                        <label className="block text-xs font-medium mb-1">
+                          Название видео
+                        </label>
+                        <input
+                          type="text"
+                          value={video.title}
+                          onChange={(e) => handleVideoChange(index, 'title', e.target.value)}
+                          className="input w-full text-sm"
+                          placeholder="Введите название видео"
+                          required
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-xs font-medium mb-1">
+                          YouTube URL
+                        </label>
+                        <input
+                          type="url"
+                          value={video.youtubeUrl}
+                          onChange={(e) => handleVideoChange(index, 'youtubeUrl', e.target.value)}
+                          className="input w-full text-sm"
+                          placeholder="https://youtube.com/watch?v=..."
+                          required
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-xs font-medium mb-1">
+                          Длительность (в секундах)
+                        </label>
+                        <input
+                          type="number"
+                          value={video.duration}
+                          onChange={(e) => handleVideoChange(index, 'duration', parseInt(e.target.value, 10) || 0)}
+                          className="input w-full text-sm"
+                          placeholder="300"
+                          required
+                          min="0"
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-xs font-medium mb-1">
+                          Описание видео
+                        </label>
+                        <textarea
+                          value={video.description}
+                          onChange={(e) => handleVideoChange(index, 'description', e.target.value)}
+                          className="input w-full text-sm"
+                          placeholder="Краткое описание содержания видео"
+                          rows={2}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                  
+                  <button 
+                    type="button" 
+                    onClick={addVideo}
+                    className="btn btn-secondary w-full"
+                  >
+                    + Добавить видео
+                  </button>
+                </div>
+              </div>
+              
               <button 
                 type="submit" 
                 className="btn btn-primary w-full"
@@ -268,6 +421,77 @@ export default function AdminPage() {
           {/* Информационная панель */}
           <div className="bg-background-light p-6 rounded-lg shadow-md">
             <h2 className="text-xl font-semibold mb-4">Управление платформой</h2>
+            
+            {/* Статистика */}
+            <div className="mb-6">
+              <h3 className="font-medium mb-3">Статистика платформы</h3>
+              
+              {statsLoading ? (
+                <div className="flex justify-center py-4">
+                  <Loader size="small" />
+                </div>
+              ) : stats ? (
+                <div>
+                  {/* Обзор */}
+                  <div className="grid grid-cols-3 gap-3 mb-4">
+                    <div className="p-3 bg-primary/10 rounded-lg">
+                      <div className="text-sm text-text-secondary">Пользователей</div>
+                      <div className="text-xl font-semibold">{stats.overview.totalUsers}</div>
+                      <div className="text-xs text-text-secondary">+{stats.overview.usersToday} сегодня</div>
+                    </div>
+                    
+                    <div className="p-3 bg-primary/10 rounded-lg">
+                      <div className="text-sm text-text-secondary">Курсов</div>
+                      <div className="text-xl font-semibold">{stats.overview.totalCourses}</div>
+                      <div className="text-xs text-text-secondary">+{stats.overview.coursesToday} сегодня</div>
+                    </div>
+                    
+                    <div className="p-3 bg-primary/10 rounded-lg">
+                      <div className="text-sm text-text-secondary">Новых за 7 дней</div>
+                      <div className="text-xl font-semibold">{stats.overview.newUsers}</div>
+                      <div className="text-xs text-text-secondary">пользователей</div>
+                    </div>
+                  </div>
+                  
+                  {/* Категории */}
+                  {stats.categories && stats.categories.length > 0 && (
+                    <div className="mb-4">
+                      <h4 className="text-sm font-medium mb-2">Популярные категории</h4>
+                      <div className="space-y-1">
+                        {stats.categories.map((cat: any) => (
+                          <div key={cat._id} className="flex justify-between">
+                            <span className="text-sm">{cat._id}</span>
+                            <span className="text-sm text-text-secondary">{cat.count} курсов</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Теги */}
+                  {stats.tags && stats.tags.length > 0 && (
+                    <div className="mb-4">
+                      <h4 className="text-sm font-medium mb-2">Популярные теги</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {stats.tags.map((tag: any) => (
+                          <span 
+                            key={tag._id} 
+                            className="inline-block px-2 py-1 bg-secondary/20 text-xs rounded"
+                          >
+                            {tag._id} ({tag.count})
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-text-secondary italic text-sm">
+                  Не удалось загрузить статистику
+                </div>
+              )}
+            </div>
+            
             <p className="text-text-secondary mb-6">
               Дополнительные функции для администраторов:
             </p>
