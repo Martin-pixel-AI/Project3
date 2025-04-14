@@ -11,6 +11,7 @@ export interface IUser extends Document {
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
+  isModified(path: string): boolean;
 }
 
 const UserSchema: Schema = new Schema(
@@ -26,7 +27,7 @@ const UserSchema: Schema = new Schema(
 );
 
 // Hash password before saving
-UserSchema.pre('save', async function(next) {
+UserSchema.pre<IUser>('save', async function(next) {
   if (!this.isModified('password')) return next();
   
   try {

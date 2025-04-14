@@ -9,6 +9,7 @@ export interface IAdmin extends Document {
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
+  isModified(path: string): boolean;
 }
 
 const AdminSchema: Schema = new Schema(
@@ -22,7 +23,7 @@ const AdminSchema: Schema = new Schema(
 );
 
 // Hash password before saving
-AdminSchema.pre('save', async function(next) {
+AdminSchema.pre<IAdmin>('save', async function(next) {
   if (!this.isModified('password')) return next();
   
   try {
