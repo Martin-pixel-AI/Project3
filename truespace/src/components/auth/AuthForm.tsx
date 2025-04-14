@@ -155,7 +155,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ mode, onModeChange }) => {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="input"
-              required={mode !== 'restore'}
+              required={mode === 'login' || mode === 'register'}
             />
           </div>
         )}
