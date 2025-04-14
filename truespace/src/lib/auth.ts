@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import { NextRequest, NextResponse } from 'next/server';
 import { IUser } from '../models/User';
 import { IAdmin } from '../models/Admin';
+import { Document } from 'mongoose';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -18,8 +19,11 @@ export interface JwtPayload {
 
 // Generate token for user or admin
 export function generateToken(user: IUser | IAdmin, type: 'user' | 'admin'): string {
+  // Using Document methods
+  const id = (user as Document).id;
+  
   const payload: JwtPayload = {
-    id: user._id.toString(),
+    id,
     email: user.email,
     type,
   };
