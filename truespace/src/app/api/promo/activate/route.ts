@@ -3,6 +3,7 @@ import dbConnect from '../../../../lib/db';
 import PromoCode from '../../../../models/PromoCode';
 import User from '../../../../models/User';
 import { withAuth } from '../../../../lib/auth';
+import mongoose from 'mongoose';
 
 async function handler(req: NextRequest) {
   try {
@@ -36,7 +37,7 @@ async function handler(req: NextRequest) {
     
     // Add courses to user's activated courses
     const coursesToAdd = promoCode.courseIds.filter(
-      courseId => !user.activatedCourses.includes(courseId)
+      (courseId: mongoose.Types.ObjectId) => !user.activatedCourses.includes(courseId)
     );
     
     user.activatedCourses = [...user.activatedCourses, ...coursesToAdd];
