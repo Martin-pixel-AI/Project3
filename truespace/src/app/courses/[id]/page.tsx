@@ -1,5 +1,6 @@
-'use client';
+"use client";
 
+import { Metadata } from 'next';
 import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Navbar from '../../../components/navigation/Navbar';

@@ -1,5 +1,6 @@
-'use client';
+"use client";
 
+import { Metadata } from 'next';
 import React, { useState } from 'react';
 import Navbar from '../../components/navigation/Navbar';
 import AuthForm from '../../components/auth/AuthForm';
