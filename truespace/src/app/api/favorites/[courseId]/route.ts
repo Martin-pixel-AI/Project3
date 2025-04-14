@@ -71,7 +71,7 @@ async function removeFromFavorites(req: NextRequest, { params }: Params) {
     }
     
     user.favorites = user.favorites.filter(
-      (id) => id.toString() !== courseId
+      (id: mongoose.Types.ObjectId) => id.toString() !== courseId
     );
     
     await user.save();
