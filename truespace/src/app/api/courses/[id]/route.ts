@@ -65,10 +65,26 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
     
-    // User needs to have this course in activatedCourses
-    const hasAccess = user.activatedCourses.some(
-      (courseId: mongoose.Types.ObjectId) => courseId.toString() === id
+    // Убедимся, что activatedCourses - это массив
+    if (!user.activatedCourses) {
+      user.activatedCourses = [];
+      await user.save();
+    }
+    
+    // Конвертируем ObjectID в строки для корректного сравнения
+    const userActivatedCoursesStrings = user.activatedCourses.map(
+      (courseId: mongoose.Types.ObjectId) => courseId.toString()
     );
+    
+    // User needs to have this course in activatedCourses
+    const hasAccess = userActivatedCoursesStrings.includes(id);
+    
+    console.log('Access check:', { 
+      userId, 
+      courseId: id, 
+      userActivatedCourses: userActivatedCoursesStrings, 
+      hasAccess 
+    });
     
     if (!hasAccess) {
       return NextResponse.json({ 
@@ -90,6 +106,8 @@ export const POST = withAuth(getFullCourse);
 
 // Удаление курса (только для администратора)
 async function deleteCourse(req: NextRequest, { params }: Params) {
+  const session = await mongoose.startSession();
+  
   try {
     await dbConnect();
     
@@ -111,44 +129,45 @@ async function deleteCourse(req: NextRequest, { params }: Params) {
     }
     
     // Используем транзакцию для удаления курса и всех связанных данных
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    await session.startTransaction();
     
     try {
       // Удаляем курс
-      await Course.findByIdAndDelete(id, { session });
+      await Course.findByIdAndDelete(id).session(session);
       
       // Удаляем курс из списка активированных у пользователей
       await User.updateMany(
         { activatedCourses: id }, 
-        { $pull: { activatedCourses: id } },
-        { session }
-      );
+        { $pull: { activatedCourses: id } }
+      ).session(session);
       
       // Удаляем курс из избранного у пользователей
       await User.updateMany(
         { favorites: id }, 
-        { $pull: { favorites: id } },
-        { session }
-      );
+        { $pull: { favorites: id } }
+      ).session(session);
       
       await session.commitTransaction();
+      
       return NextResponse.json({ 
         message: 'Курс успешно удален',
         deletedCourseId: id
       });
-    } catch (error) {
+    } catch (error: any) {
       await session.abortTransaction();
-      throw error;
-    } finally {
-      session.endSession();
-    }
+      console.error('Ошибка при выполнении транзакции:', error);
+      return NextResponse.json({ 
+        error: error.message || 'Ошибка при удалении курса' 
+      }, { status: 500 });
+    } 
     
   } catch (error: any) {
     console.error('Ошибка удаления курса:', error);
     return NextResponse.json({ 
       error: error.message || 'Не удалось удалить курс' 
     }, { status: 500 });
+  } finally {
+    session.endSession();
   }
 }
 
@@ -156,6 +175,8 @@ export const DELETE = withAuth(deleteCourse);
 
 // Обновление курса (только для администратора)
 async function updateCourse(req: NextRequest, { params }: Params) {
+  const session = await mongoose.startSession();
+  
   try {
     await dbConnect();
     
@@ -188,8 +209,7 @@ async function updateCourse(req: NextRequest, { params }: Params) {
     }
     
     // Используем транзакцию для обновления курса и видео
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    await session.startTransaction();
     
     try {
       // Обновляем основные данные курса
@@ -202,7 +222,7 @@ async function updateCourse(req: NextRequest, { params }: Params) {
         course.thumbnail = thumbnail;
       }
       
-      await course.save({ session });
+      await course.save();
       
       // Обновляем видео, если они предоставлены
       if (videos && videos.length > 0) {
@@ -219,9 +239,8 @@ async function updateCourse(req: NextRequest, { params }: Params) {
               youtubeUrl: video.youtubeUrl,
               duration: video.duration,
               description: video.description
-            },
-            { session }
-          );
+            }
+          ).session(session);
         }
         
         // Создаем новые видео и привязываем к курсу
@@ -234,12 +253,16 @@ async function updateCourse(req: NextRequest, { params }: Params) {
             courseId: course._id
           }));
           
-          const createdVideos = await mongoose.model('Video').create(videosToCreate);
+          const VideoModel = mongoose.model('Video');
+          const createdVideos = await VideoModel.create(
+            videosToCreate,
+            { session }
+          );
           
           // Добавляем новые видео к списку видео курса
           const videoIds = createdVideos.map((v: any) => v._id);
           course.videos = [...course.videos, ...videoIds];
-          await course.save({ session });
+          await course.save();
         }
       }
       
@@ -251,18 +274,21 @@ async function updateCourse(req: NextRequest, { params }: Params) {
         message: 'Курс успешно обновлен',
         course: updatedCourse
       });
-    } catch (error) {
+    } catch (error: any) {
       await session.abortTransaction();
-      throw error;
-    } finally {
-      session.endSession();
-    }
+      console.error('Ошибка при обновлении курса (транзакция):', error);
+      return NextResponse.json({ 
+        error: error.message || 'Ошибка при обновлении курса' 
+      }, { status: 500 });
+    } 
     
   } catch (error: any) {
     console.error('Ошибка обновления курса:', error);
     return NextResponse.json({ 
       error: error.message || 'Не удалось обновить курс' 
     }, { status: 500 });
+  } finally {
+    session.endSession();
   }
 }
 

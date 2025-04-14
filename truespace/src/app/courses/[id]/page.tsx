@@ -157,6 +157,7 @@ export default function CourseDetailPage() {
         return;
       }
       
+      // Активируем промокод
       const response = await fetch('/api/promo/activate', {
         method: 'POST',
         headers: {
@@ -171,33 +172,43 @@ export default function CourseDetailPage() {
         throw new Error(data.error || 'Failed to activate promo code');
       }
       
-      // После успешной активации промокода
-      // Делаем повторный запрос полных данных курса
-      const fullCourseResponse = await fetch(`/api/courses/${courseId}`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      // Получаем подтверждение активации
+      const activationData = await response.json();
+      console.log('Promo code activated:', activationData);
       
-      if (fullCourseResponse.ok) {
-        const fullCourseData = await fullCourseResponse.json();
-        setCourse(fullCourseData.course);
-        
-        // Если получили видео, значит курс доступен
-        setIsLocked(false);
-        setShowVideoPlayer(fullCourseData.course.videos?.length > 0);
-        
-        // Устанавливаем первое видео как выбранное
-        if (fullCourseData.course.videos?.length) {
-          setSelectedVideo(fullCourseData.course.videos[0]);
+      // После успешной активации промокода делаем небольшую паузу
+      // чтобы изменения в базе данных успели применится
+      setTimeout(async () => {
+        try {
+          // Делаем повторный запрос полных данных курса
+          const fullCourseResponse = await fetch(`/api/courses/${courseId}`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          
+          if (fullCourseResponse.ok) {
+            const fullCourseData = await fullCourseResponse.json();
+            setCourse(fullCourseData.course);
+            
+            // Если получили видео, значит курс доступен
+            setIsLocked(false);
+            setShowVideoPlayer(fullCourseData.course.videos?.length > 0);
+            
+            // Устанавливаем первое видео как выбранное
+            if (fullCourseData.course.videos?.length) {
+              setSelectedVideo(fullCourseData.course.videos[0]);
+            }
+          } else {
+            // Если не удалось получить полную информацию о курсе, обновляем страницу
+            window.location.reload();
+          }
+        } catch (error) {
+          console.error('Error fetching course after promo activation:', error);
+          window.location.reload();
         }
-        
-        return;
-      }
-      
-      // Если что-то пошло не так, обновляем страницу
-      window.location.reload();
+      }, 1000); // Небольшая задержка для обновления базы данных
       
     } catch (err) {
       throw err;

@@ -35,12 +35,27 @@ async function handler(req: NextRequest) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
     
-    // Add courses to user's activated courses
-    const coursesToAdd = promoCode.courseIds.filter(
-      (courseId: mongoose.Types.ObjectId) => !user.activatedCourses.includes(courseId)
+    // Убедимся, что activatedCourses - это массив
+    if (!user.activatedCourses) {
+      user.activatedCourses = [];
+    }
+    
+    // Преобразуем существующие courseIds в строки для сравнения
+    const userActivatedCoursesStrings = user.activatedCourses.map(
+      (id: mongoose.Types.ObjectId) => id.toString()
     );
     
-    user.activatedCourses = [...user.activatedCourses, ...coursesToAdd];
+    // Добавляем только те курсы, которых еще нет у пользователя
+    const coursesToAdd = promoCode.courseIds.filter(
+      (courseId: mongoose.Types.ObjectId) => !userActivatedCoursesStrings.includes(courseId.toString())
+    );
+    
+    // Конвертируем строки ObjectId обратно в ObjectId
+    user.activatedCourses = [
+      ...user.activatedCourses,
+      ...coursesToAdd
+    ];
+    
     user.promoCode = code; // Save the last used promo code
     
     await user.save();
@@ -49,9 +64,13 @@ async function handler(req: NextRequest) {
     promoCode.uses += 1;
     await promoCode.save();
     
+    // В ответе отправим полный список курсов для диагностики
     return NextResponse.json({ 
       message: 'Promo code activated successfully',
-      activatedCourses: user.activatedCourses
+      activatedCourses: user.activatedCourses,
+      activatedCoursesCount: user.activatedCourses.length,
+      promoCodeCourses: promoCode.courseIds,
+      promoCodeCoursesCount: promoCode.courseIds.length
     });
     
   } catch (error: any) {
