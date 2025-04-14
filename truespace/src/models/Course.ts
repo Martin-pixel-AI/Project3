@@ -1,5 +1,12 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+export interface CourseDocument {
+  fileName: string;
+  fileUrl: string;
+  fileType: string;
+  fileSize: number;
+}
+
 export interface ICourse extends Document {
   title: string;
   description: string;
@@ -9,6 +16,8 @@ export interface ICourse extends Document {
   createdAt: Date;
   updatedAt: Date;
   thumbnail?: string;
+  documents?: CourseDocument[];
+  hiddenDescription?: string;
 }
 
 const CourseSchema: Schema = new Schema(
@@ -18,7 +27,14 @@ const CourseSchema: Schema = new Schema(
     category: { type: String, required: true },
     tags: [{ type: String }],
     videos: [{ type: Schema.Types.ObjectId, ref: 'Video' }],
-    thumbnail: { type: String }
+    thumbnail: { type: String },
+    documents: [{
+      fileName: { type: String },
+      fileUrl: { type: String },
+      fileType: { type: String },
+      fileSize: { type: Number }
+    }],
+    hiddenDescription: { type: String }
   },
   { timestamps: true }
 );
@@ -27,12 +43,14 @@ const CourseSchema: Schema = new Schema(
 CourseSchema.index({ 
   title: 'text', 
   description: 'text', 
-  tags: 'text' 
+  tags: 'text',
+  hiddenDescription: 'text'
 }, { 
   weights: { 
     title: 10, 
     description: 5, 
-    tags: 3 
+    tags: 3,
+    hiddenDescription: 2
   } 
 });
 
