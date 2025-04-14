@@ -1,38 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
 import dbConnect from '../../../../lib/db';
 import User from '../../../../models/User';
+import Admin from '../../../../models/Admin';
 import { withAuth } from '../../../../lib/auth';
 
 async function handler(req: NextRequest) {
   try {
     await dbConnect();
     
-    const userId = (req as any).user.id;
+    const userData = (req as any).user;
+    const userId = userData.id;
+    const userType = userData.type || 'user';
     
-    // Find user with populated courses
-    const user = await User.findById(userId)
-      .populate('favorites')
-      .populate('activatedCourses');
-    
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    // В зависимости от типа пользователя, получаем данные из соответствующей модели
+    let user;
+    if (userType === 'admin') {
+      user = await Admin.findById(userId).select('-password');
+    } else {
+      user = await User.findById(userId).select('-password');
     }
     
-    // Return user without password
-    const userResponse = {
-      id: user._id,
-      email: user.email,
-      name: user.name,
-      favorites: user.favorites,
-      activatedCourses: user.activatedCourses,
-      promoCode: user.promoCode
-    };
+    if (!user) {
+      return NextResponse.json({ error: 'Пользователь не найден' }, { status: 404 });
+    }
     
-    return NextResponse.json({ user: userResponse });
+    // Возвращаем информацию о пользователе вместе с типом
+    return NextResponse.json({
+      ...user.toJSON(),
+      type: userType
+    });
     
   } catch (error: any) {
-    console.error('Get user profile error:', error);
-    return NextResponse.json({ error: error.message || 'Failed to get user profile' }, { status: 500 });
+    console.error('Get user error:', error);
+    return NextResponse.json({ error: error.message || 'Не удалось получить данные пользователя' }, { status: 500 });
   }
 }
 
