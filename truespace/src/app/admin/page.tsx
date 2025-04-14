@@ -11,6 +11,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [createdPromoCode, setCreatedPromoCode] = useState<string | null>(null);
   
   // Состояние для статистики
   const [stats, setStats] = useState<any>(null);
@@ -23,7 +24,10 @@ export default function AdminPage() {
     category: '',
     tags: '',
     thumbnail: '',
-    videos: [{ title: '', youtubeUrl: '', duration: 0, description: '' }]
+    videos: [{ title: '', youtubeUrl: '', duration: 0, description: '' }],
+    generatePromo: false,
+    customPromoCode: '',
+    promoMaxUses: 10
   });
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -70,6 +74,7 @@ export default function AdminPage() {
     e.preventDefault();
     setFormError(null);
     setSuccess(null);
+    setCreatedPromoCode(null);
     setFormLoading(true);
     
     try {
@@ -108,10 +113,18 @@ export default function AdminPage() {
         category: '',
         tags: '',
         thumbnail: '',
-        videos: [{ title: '', youtubeUrl: '', duration: 0, description: '' }]
+        videos: [{ title: '', youtubeUrl: '', duration: 0, description: '' }],
+        generatePromo: false,
+        customPromoCode: '',
+        promoMaxUses: 10
       });
       
       setSuccess('Курс успешно создан!');
+      
+      // Сохраняем информацию о промокоде, если он был создан
+      if (data.promoCode) {
+        setCreatedPromoCode(data.promoCode.code);
+      }
       
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Произошла ошибка');
@@ -227,6 +240,25 @@ export default function AdminPage() {
         {success && (
           <div className="mb-6 p-4 bg-green-900/30 text-green-200 rounded-lg">
             {success}
+          </div>
+        )}
+        
+        {createdPromoCode && (
+          <div className="mb-6 p-4 bg-blue-900/30 text-blue-100 rounded-lg flex items-center">
+            <div className="flex-1">
+              <span className="font-medium">Промокод создан:</span>{' '}
+              <span className="bg-blue-900/50 px-2 py-1 rounded font-mono">{createdPromoCode}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(createdPromoCode);
+                alert('Промокод скопирован в буфер обмена');
+              }}
+              className="ml-2 px-3 py-1 bg-blue-800 hover:bg-blue-700 rounded text-sm"
+            >
+              Копировать
+            </button>
           </div>
         )}
         
@@ -406,6 +438,90 @@ export default function AdminPage() {
                     + Добавить видео
                   </button>
                 </div>
+              </div>
+              
+              {/* Секция для промокода */}
+              <div className="mt-8 p-4 bg-background-lighter rounded-lg">
+                <div className="flex items-center mb-4">
+                  <input
+                    type="checkbox"
+                    id="generatePromo"
+                    checked={courseForm.generatePromo}
+                    onChange={(e) => 
+                      setCourseForm(prev => ({
+                        ...prev,
+                        generatePromo: e.target.checked
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-gray-600 mr-2"
+                  />
+                  <label htmlFor="generatePromo" className="font-medium">
+                    Создать промокод для этого курса
+                  </label>
+                </div>
+                
+                {courseForm.generatePromo && (
+                  <div className="space-y-3">
+                    <div>
+                      <label htmlFor="customPromoCode" className="block text-sm font-medium mb-1">
+                        Код промокода (опционально)
+                      </label>
+                      <div className="flex items-center">
+                        <input
+                          id="customPromoCode"
+                          name="customPromoCode"
+                          type="text"
+                          value={courseForm.customPromoCode}
+                          onChange={handleFormChange}
+                          className="input flex-1"
+                          placeholder="Оставьте пустым для автоматической генерации"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const characters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+                            let result = '';
+                            for (let i = 0; i < 8; i++) {
+                              result += characters.charAt(Math.floor(Math.random() * characters.length));
+                            }
+                            setCourseForm(prev => ({ ...prev, customPromoCode: result }));
+                          }}
+                          className="btn btn-primary ml-2"
+                        >
+                          Сгенерировать
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <label htmlFor="promoMaxUses" className="block text-sm font-medium mb-1">
+                        Максимальное число использований
+                      </label>
+                      <input
+                        id="promoMaxUses"
+                        name="promoMaxUses"
+                        type="number"
+                        value={courseForm.promoMaxUses}
+                        onChange={(e) => 
+                          setCourseForm(prev => ({
+                            ...prev,
+                            promoMaxUses: parseInt(e.target.value, 10) || 1
+                          }))
+                        }
+                        className="input w-full"
+                        min="1"
+                        max="1000"
+                      />
+                      <p className="text-xs text-text-secondary mt-1">
+                        Сколько раз промокод может быть использован
+                      </p>
+                    </div>
+                    
+                    <p className="text-sm text-primary">
+                      Промокод будет действовать в течение 30 дней с момента создания
+                    </p>
+                  </div>
+                )}
               </div>
               
               <button 
