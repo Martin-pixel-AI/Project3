@@ -171,7 +171,32 @@ export default function CourseDetailPage() {
         throw new Error(data.error || 'Failed to activate promo code');
       }
       
-      // Refresh the page to show unlocked content
+      // После успешной активации промокода
+      // Делаем повторный запрос полных данных курса
+      const fullCourseResponse = await fetch(`/api/courses/${courseId}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      
+      if (fullCourseResponse.ok) {
+        const fullCourseData = await fullCourseResponse.json();
+        setCourse(fullCourseData.course);
+        
+        // Если получили видео, значит курс доступен
+        setIsLocked(false);
+        setShowVideoPlayer(fullCourseData.course.videos?.length > 0);
+        
+        // Устанавливаем первое видео как выбранное
+        if (fullCourseData.course.videos?.length) {
+          setSelectedVideo(fullCourseData.course.videos[0]);
+        }
+        
+        return;
+      }
+      
+      // Если что-то пошло не так, обновляем страницу
       window.location.reload();
       
     } catch (err) {

@@ -163,6 +163,38 @@ export default function AdminPage() {
     }
   };
   
+  // Функция для удаления курса
+  const deleteCourse = async (courseId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        throw new Error('Вы не авторизованы');
+      }
+      
+      const response = await fetch(`/api/courses/${courseId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Не удалось удалить курс');
+      }
+      
+      setSuccess('Курс успешно удален!');
+      
+      // Обновляем статистику после удаления
+      loadStats();
+      
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Произошла ошибка при удалении курса');
+    }
+  };
+  
   // Check admin auth
   useEffect(() => {
     const checkAuth = async () => {
@@ -625,6 +657,59 @@ export default function AdminPage() {
                 Здесь будет отображаться лог действий администратора
               </div>
             </div>
+          </div>
+        </div>
+        
+        {/* Новая секция для списка курсов */}
+        <div className="mt-8 bg-background-light p-6 rounded-lg shadow-md">
+          <h2 className="text-xl font-semibold mb-4">Управление курсами</h2>
+          
+          <div className="course-list">
+            {stats && stats.courses ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-background-lighter">
+                    <tr>
+                      <th className="p-2 text-left">Название</th>
+                      <th className="p-2 text-left">Категория</th>
+                      <th className="p-2 text-left">Просмотры</th>
+                      <th className="p-2 text-left">Создан</th>
+                      <th className="p-2 text-left">Действия</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.courses.map((course: any) => (
+                      <tr key={course._id} className="border-b border-gray-800">
+                        <td className="p-2">{course.title}</td>
+                        <td className="p-2">{course.category}</td>
+                        <td className="p-2">{course.views || 0}</td>
+                        <td className="p-2">{new Date(course.createdAt).toLocaleDateString()}</td>
+                        <td className="p-2 flex space-x-2">
+                          <button 
+                            onClick={() => router.push(`/admin/courses/edit/${course._id}`)}
+                            className="px-2 py-1 bg-blue-600 text-white rounded text-xs"
+                          >
+                            Редактировать
+                          </button>
+                          <button 
+                            onClick={() => {
+                              if(confirm(`Вы точно хотите удалить курс "${course.title}"?`)) {
+                                deleteCourse(course._id);
+                              }
+                            }}
+                            className="px-2 py-1 bg-red-600 text-white rounded text-xs"
+                          >
+                            Удалить
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-text-secondary italic">Загрузка списка курсов...</p>
+            )}
           </div>
         </div>
       </main>

@@ -81,6 +81,11 @@ async function getStats(req: NextRequest) {
       usersMonthlyData[item._id - 1] = item.count;
     });
     
+    // Получение списка всех курсов для администратора
+    const courses = await Course.find({})
+      .select('title category views createdAt')
+      .sort({ createdAt: -1 });
+    
     return NextResponse.json({
       overview: {
         totalUsers,
@@ -92,7 +97,8 @@ async function getStats(req: NextRequest) {
       },
       categories: categoryStats,
       tags: tagStats,
-      usersMonthlyData
+      usersMonthlyData,
+      courses
     });
     
   } catch (error: any) {
