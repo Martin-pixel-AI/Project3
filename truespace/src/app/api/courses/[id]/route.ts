@@ -3,6 +3,7 @@ import dbConnect from '../../../../lib/db';
 import Course from '../../../../models/Course';
 import User from '../../../../models/User';
 import { withAuth } from '../../../../lib/auth';
+import mongoose from 'mongoose';
 
 interface Params {
   params: {
@@ -58,7 +59,7 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
     
     // User needs to have this course in activatedCourses
     const hasAccess = user.activatedCourses.some(
-      (courseId) => courseId.toString() === id
+      (courseId: mongoose.Types.ObjectId) => courseId.toString() === id
     );
     
     if (!hasAccess) {
