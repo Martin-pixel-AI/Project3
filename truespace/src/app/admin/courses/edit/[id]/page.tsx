@@ -38,6 +38,8 @@ export default function EditCoursePage() {
           return;
         }
         
+        console.log('Fetching course data for editing:', courseId);
+        
         // Получаем полную информацию о курсе
         const response = await fetch(`/api/courses/${courseId}`, {
           method: 'POST',
@@ -46,14 +48,32 @@ export default function EditCoursePage() {
           }
         });
         
-        const data = await response.json();
+        // Получаем текст ответа для отладки
+        const responseText = await response.text();
+        console.log('Response text:', responseText);
+        
+        // Преобразуем текст в JSON, если возможно
+        let data;
+        try {
+          data = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error('Failed to parse JSON:', parseError);
+          throw new Error(`Ошибка формата данных: ${responseText.substring(0, 100)}...`);
+        }
         
         if (!response.ok) {
           throw new Error(data.error || 'Не удалось загрузить данные курса');
         }
         
+        if (!data.course) {
+          console.error('Course data missing in response:', data);
+          throw new Error('Данные курса отсутствуют в ответе сервера');
+        }
+        
         // Заполняем форму данными курса
         const course = data.course;
+        console.log('Course data received:', course);
+        
         setCourseForm({
           title: course.title || '',
           description: course.description || '',
@@ -132,11 +152,15 @@ export default function EditCoursePage() {
         throw new Error('Вы не авторизованы');
       }
       
+      console.log('Submitting course update:', courseId);
+      
       // Подготавливаем данные
       const formData = {
         ...courseForm,
         tags: courseForm.tags.split(',').map(tag => tag.trim()).filter(tag => tag)
       };
+      
+      console.log('Form data:', formData);
       
       // Отправляем запрос
       const response = await fetch(`/api/courses/${courseId}`, {
@@ -148,15 +172,28 @@ export default function EditCoursePage() {
         body: JSON.stringify(formData)
       });
       
-      const data = await response.json();
+      // Получаем текст ответа для отладки
+      const responseText = await response.text();
+      console.log('Response text:', responseText);
+      
+      // Преобразуем текст в JSON, если возможно
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('Failed to parse JSON:', parseError);
+        throw new Error(`Ошибка формата данных: ${responseText.substring(0, 100)}...`);
+      }
       
       if (!response.ok) {
         throw new Error(data.error || 'Ошибка при обновлении курса');
       }
       
       setSuccess('Курс успешно обновлен!');
+      console.log('Course updated successfully:', data);
       
     } catch (err) {
+      console.error('Error updating course:', err);
       setError(err instanceof Error ? err.message : 'Произошла ошибка');
     } finally {
       setSubmitting(false);

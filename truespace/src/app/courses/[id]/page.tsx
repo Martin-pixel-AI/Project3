@@ -157,6 +157,8 @@ export default function CourseDetailPage() {
         return;
       }
       
+      console.log('Attempting to activate promo code:', code);
+      
       // Активируем промокод
       const response = await fetch('/api/promo/activate', {
         method: 'POST',
@@ -167,19 +169,21 @@ export default function CourseDetailPage() {
         body: JSON.stringify({ code }),
       });
       
+      // Получаем данные ответа только один раз
+      const activationData = await response.json();
+      
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to activate promo code');
+        throw new Error(activationData.error || 'Failed to activate promo code');
       }
       
-      // Получаем подтверждение активации
-      const activationData = await response.json();
-      console.log('Promo code activated:', activationData);
+      console.log('Promo code activation response:', activationData);
       
       // После успешной активации промокода делаем небольшую паузу
       // чтобы изменения в базе данных успели применится
       setTimeout(async () => {
         try {
+          console.log('Fetching updated course data after promo activation');
+          
           // Делаем повторный запрос полных данных курса
           const fullCourseResponse = await fetch(`/api/courses/${courseId}`, {
             method: 'POST',
@@ -188,8 +192,11 @@ export default function CourseDetailPage() {
             },
           });
           
+          const fullCourseData = await fullCourseResponse.json();
+          console.log('Course data after promo activation:', fullCourseData);
+          
           if (fullCourseResponse.ok) {
-            const fullCourseData = await fullCourseResponse.json();
+            console.log('Updating UI with new course data');
             setCourse(fullCourseData.course);
             
             // Если получили видео, значит курс доступен
@@ -201,17 +208,21 @@ export default function CourseDetailPage() {
               setSelectedVideo(fullCourseData.course.videos[0]);
             }
           } else {
+            console.error('Failed to get updated course data:', fullCourseData.error);
             // Если не удалось получить полную информацию о курсе, обновляем страницу
+            alert('Промокод был активирован, но не удалось загрузить данные курса. Страница будет перезагружена.');
             window.location.reload();
           }
         } catch (error) {
           console.error('Error fetching course after promo activation:', error);
+          alert('Промокод был активирован, но произошла ошибка при загрузке видео. Страница будет перезагружена.');
           window.location.reload();
         }
-      }, 1000); // Небольшая задержка для обновления базы данных
+      }, 2000); // Увеличиваем задержку до 2 секунд
       
     } catch (err) {
-      throw err;
+      console.error('Error activating promo code:', err);
+      alert(err instanceof Error ? err.message : 'Не удалось активировать промокод');
     }
   };
   
