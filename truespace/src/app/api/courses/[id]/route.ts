@@ -69,7 +69,9 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
     // Администратор всегда имеет доступ к полной информации о курсе
     if (userType === 'admin') {
       console.log('Admin access granted for course:', id);
-      return NextResponse.json({ course });
+      // Ensure we're returning a serializable object
+      const serializedCourse = course.toObject ? course.toObject() : course;
+      return NextResponse.json({ course: serializedCourse });
     }
     
     // Для обычных пользователей проверяем доступ
@@ -124,11 +126,16 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
     }
     
     console.log('Access granted for course:', id);
-    return NextResponse.json({ course });
+    // Ensure we're returning a serializable object
+    const serializedCourse = course.toObject ? course.toObject() : course;
+    return NextResponse.json({ course: serializedCourse });
     
   } catch (error: any) {
     console.error('Get full course error:', error);
-    return NextResponse.json({ error: error.message || 'Failed to get course videos' }, { status: 500 });
+    return NextResponse.json({ 
+      error: error.message || 'Failed to get course videos',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    }, { status: 500 });
   }
 }
 
@@ -200,19 +207,24 @@ async function deleteCourse(req: NextRequest, { params }: Params) {
     } catch (courseDeletionError) {
       console.error('Error deleting course:', courseDeletionError);
       return NextResponse.json({ 
-        error: 'Не удалось удалить курс' 
+        error: 'Не удалось удалить курс',
+        details: (courseDeletionError as Error).message
       }, { status: 500 });
     }
     
-    return NextResponse.json({ 
+    const response = { 
       message: 'Курс успешно удален',
       deletedCourseId: id,
       title: course.title
-    });
+    };
+    
+    console.log('Successfully deleted course:', response);
+    return NextResponse.json(response);
   } catch (error: any) {
     console.error('Error deleting course:', error);
     return NextResponse.json({ 
-      error: error.message || 'Не удалось удалить курс' 
+      error: error.message || 'Не удалось удалить курс',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     }, { status: 500 });
   }
 }
@@ -235,7 +247,17 @@ async function updateCourse(req: NextRequest, { params }: Params) {
     }
     
     // Получаем данные из запроса
-    const reqText = await req.text();
+    let reqText;
+    try {
+      reqText = await req.text();
+    } catch (textError) {
+      console.error('Error reading request body:', textError);
+      return NextResponse.json({
+        error: 'Не удалось прочитать тело запроса',
+        details: (textError as Error).message
+      }, { status: 400 });
+    }
+    
     if (!reqText || reqText.trim() === '') {
       console.error('Empty request body');
       return NextResponse.json({ 
@@ -280,10 +302,17 @@ async function updateCourse(req: NextRequest, { params }: Params) {
     }
     
     // Сохраняем изменения курса
-    await course.save();
+    try {
+      await course.save();
+    } catch (saveError) {
+      console.error('Error saving course:', saveError);
+      return NextResponse.json({
+        error: 'Не удалось сохранить курс',
+        details: (saveError as Error).message
+      }, { status: 500 });
+    }
     
     // Обрабатываем видео без использования сессии
-    // Сначала видео с ID (существующие)
     if (videos && videos.length > 0) {
       const existingVideos = videos.filter((v: any) => v._id);
       const newVideos = videos.filter((v: any) => !v._id);
@@ -330,21 +359,39 @@ async function updateCourse(req: NextRequest, { params }: Params) {
     }
     
     // Получаем обновленный курс с видео для ответа
-    const updatedCourse = await Course.findById(id).populate('videos');
-    if (!updatedCourse) {
+    let updatedCourse;
+    try {
+      updatedCourse = await Course.findById(id).populate('videos');
+      if (!updatedCourse) {
+        throw new Error('Course not found after update');
+      }
+    } catch (findError) {
+      console.error('Error fetching updated course:', findError);
       return NextResponse.json({ 
-        error: 'Не удалось получить обновленный курс' 
+        error: 'Не удалось получить обновленный курс',
+        details: (findError as Error).message
       }, { status: 500 });
     }
     
-    return NextResponse.json({ 
+    // Ensure we're returning a serializable object
+    const serializedCourse = updatedCourse.toObject ? updatedCourse.toObject() : updatedCourse;
+    
+    const response = { 
       message: 'Курс успешно обновлен',
-      course: updatedCourse
+      course: serializedCourse
+    };
+    
+    console.log('Successfully updated course:', {
+      id: serializedCourse._id,
+      title: serializedCourse.title
     });
+    
+    return NextResponse.json(response);
   } catch (error: any) {
     console.error('Error updating course:', error);
     return NextResponse.json({ 
-      error: error.message || 'Не удалось обновить курс' 
+      error: error.message || 'Не удалось обновить курс',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     }, { status: 500 });
   }
 }

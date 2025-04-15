@@ -30,7 +30,18 @@ const PromoCodeForm: React.FC<PromoCodeFormProps> = ({ onSubmit, courseId }) => 
       setCode('');
       setSuccess('Promo code activated successfully!');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to activate promo code');
+      console.error('PromoCodeForm error:', err);
+      let errorMessage = 'Failed to activate promo code';
+      
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        errorMessage = String((err as any).message);
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

@@ -169,11 +169,25 @@ export default function CourseDetailPage() {
         body: JSON.stringify({ code }),
       });
       
-      // Получаем данные ответа только один раз
-      const activationData = await response.json();
-      
+      // Проверяем статус ответа перед парсингом JSON
       if (!response.ok) {
-        throw new Error(activationData.error || 'Failed to activate promo code');
+        // Пытаемся прочитать ответ даже если статус не 200
+        try {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `Error ${response.status}: ${response.statusText}`);
+        } catch (jsonError) {
+          // Если не удается распарсить JSON, возвращаем статус ошибки
+          throw new Error(`Error ${response.status}: ${response.statusText}`);
+        }
+      }
+      
+      // Получаем данные ответа только после проверки статуса
+      let activationData;
+      try {
+        activationData = await response.json();
+      } catch (jsonError) {
+        console.error('Error parsing activation response:', jsonError);
+        throw new Error('Invalid response format from server');
       }
       
       console.log('Promo code activation response:', activationData);
@@ -192,10 +206,21 @@ export default function CourseDetailPage() {
             },
           });
           
-          const fullCourseData = await fullCourseResponse.json();
+          if (!fullCourseResponse.ok) {
+            throw new Error(`Failed to fetch course data: ${fullCourseResponse.status}`);
+          }
+          
+          let fullCourseData;
+          try {
+            fullCourseData = await fullCourseResponse.json();
+          } catch (jsonError) {
+            console.error('Error parsing JSON response:', jsonError);
+            throw new Error('Invalid response format from server');
+          }
+          
           console.log('Course data after promo activation:', fullCourseData);
           
-          if (fullCourseResponse.ok) {
+          if (fullCourseData && fullCourseData.course) {
             console.log('Updating UI with new course data');
             setCourse(fullCourseData.course);
             
@@ -208,7 +233,7 @@ export default function CourseDetailPage() {
               setSelectedVideo(fullCourseData.course.videos[0]);
             }
           } else {
-            console.error('Failed to get updated course data:', fullCourseData.error);
+            console.error('Failed to get updated course data:', fullCourseData?.error || 'No course data returned');
             // Если не удалось получить полную информацию о курсе, обновляем страницу
             alert('Промокод был активирован, но не удалось загрузить данные курса. Страница будет перезагружена.');
             window.location.reload();
@@ -218,11 +243,21 @@ export default function CourseDetailPage() {
           alert('Промокод был активирован, но произошла ошибка при загрузке видео. Страница будет перезагружена.');
           window.location.reload();
         }
-      }, 2000); // Увеличиваем задержку до 2 секунд
+      }, 5000); // Увеличиваем задержку до 5 секунд для уверенности, что изменения в БД успеют примениться
       
     } catch (err) {
       console.error('Error activating promo code:', err);
-      alert(err instanceof Error ? err.message : 'Не удалось активировать промокод');
+      let errorMessage = 'Не удалось активировать промокод';
+      
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        errorMessage = String((err as any).message);
+      }
+      
+      alert(errorMessage);
     }
   };
   

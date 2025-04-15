@@ -9,7 +9,17 @@ async function handler(req: NextRequest) {
   try {
     await dbConnect();
     
-    const body = await req.json();
+    let body;
+    try {
+      body = await req.json();
+    } catch (parseError) {
+      console.error('Failed to parse request body:', parseError);
+      return NextResponse.json({ 
+        error: 'Invalid request format', 
+        details: (parseError as Error).message 
+      }, { status: 400 });
+    }
+    
     const { code } = body;
     const userId = (req as any).user.id;
     
@@ -136,13 +146,18 @@ async function handler(req: NextRequest) {
     
     // Increment promo code uses only if at least one course was added
     if (actuallyAdded.length > 0) {
-      promoCode.uses += 1;
-      await promoCode.save();
-      console.log('Promo code uses incremented and saved');
+      try {
+        promoCode.uses += 1;
+        await promoCode.save();
+        console.log('Promo code uses incremented and saved');
+      } catch (saveError) {
+        console.error('Error saving promo code uses:', saveError);
+        // Continue execution even if incrementing fails
+      }
     }
     
     // Return detailed success response
-    return NextResponse.json({ 
+    const response = { 
       message: 'Promo code activated successfully',
       activatedCourses: updatedActivatedCourses,
       activatedCoursesCount: updatedActivatedCourses.length,
@@ -151,11 +166,17 @@ async function handler(req: NextRequest) {
       coursesAdded: actuallyAdded,
       coursesAddedCount: actuallyAdded.length,
       courses: coursesToActivate.map(c => ({ id: c._id.toString(), title: c.title }))
-    });
+    };
+    
+    console.log('Sending success response:', JSON.stringify(response).substring(0, 200) + '...');
+    return NextResponse.json(response);
     
   } catch (error: any) {
     console.error('Promo code activation error:', error);
-    return NextResponse.json({ error: error.message || 'Failed to activate promo code' }, { status: 500 });
+    return NextResponse.json({ 
+      error: error.message || 'Failed to activate promo code',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined 
+    }, { status: 500 });
   }
 }
 
