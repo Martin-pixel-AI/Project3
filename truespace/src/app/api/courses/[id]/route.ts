@@ -143,67 +143,106 @@ export const POST = withAuth(getFullCourse);
 
 // Удаление курса (только для администратора)
 async function deleteCourse(req: NextRequest, { params }: Params) {
+  console.log('Starting course deletion process for ID:', params.id);
   try {
-    await dbConnect();
+    // Connect to database
+    try {
+      await dbConnect();
+    } catch (dbError) {
+      console.error('Database connection error:', dbError);
+      return NextResponse.json({ 
+        error: 'Ошибка подключения к базе данных',
+        details: (dbError as Error).message
+      }, { status: 500 });
+    }
     
     const { id } = params;
     const userData = (req as any).user;
     
-    // Проверяем, что пользователь - администратор
+    // Log the deletion attempt
+    console.log('Course deletion requested by:', { userId: userData.id, userType: userData.type, courseId: id });
+    
+    // Check if user is admin
     if (userData.type !== 'admin') {
+      console.log('Deletion rejected: user is not admin');
       return NextResponse.json({ 
         error: 'Только администраторы могут удалять курсы' 
       }, { status: 403 });
     }
     
-    // Находим курс с его видео для дальнейшего удаления
-    const course = await Course.findById(id).populate('videos');
-    
-    if (!course) {
-      return NextResponse.json({ error: 'Курс не найден' }, { status: 404 });
+    // Find the course with videos for deletion
+    let course;
+    try {
+      course = await Course.findById(id);
+      if (!course) {
+        console.log('Course not found for deletion:', id);
+        return NextResponse.json({ error: 'Курс не найден' }, { status: 404 });
+      }
+    } catch (findError) {
+      console.error('Error finding course for deletion:', findError);
+      return NextResponse.json({ 
+        error: 'Ошибка при поиске курса',
+        details: (findError as Error).message
+      }, { status: 500 });
     }
     
-    // Получаем ID всех видео курса для удаления
-    const videoIds = course.videos?.map((video: any) => video._id) || [];
+    let videoIds = [];
+    try {
+      // We'll do a separate query to find videos instead of using populate
+      const Video = mongoose.model('Video');
+      const videos = await Video.find({ courseId: id });
+      videoIds = videos.map(video => video._id);
+      console.log(`Found ${videoIds.length} videos to delete for course:`, id);
+    } catch (videoFindError) {
+      console.error('Error finding videos for deletion:', videoFindError);
+      // Continue with deletion even if we can't find videos
+    }
     
-    // Шаг 1: Удаляем все видео курса
+    // Step 1: Delete all course videos
     if (videoIds.length > 0) {
       try {
         const VideoModel = mongoose.model('Video');
-        await VideoModel.deleteMany({ 
+        const deleteResult = await VideoModel.deleteMany({ 
           _id: { $in: videoIds } 
         });
+        console.log('Videos deletion result:', deleteResult);
       } catch (videoDeletionError) {
         console.error('Error deleting videos:', videoDeletionError);
-        // Продолжаем удаление даже при ошибке с видео
+        // Continue with deletion even if video deletion fails
       }
     }
     
-    // Шаг 2: Удаляем курс из активированных курсов пользователей
+    // Step 2: Remove course from users' activated courses
     try {
-      await User.updateMany(
+      const updateResult = await User.updateMany(
         { activatedCourses: id }, 
         { $pull: { activatedCourses: id } }
       );
+      console.log('Remove from activated courses result:', updateResult);
     } catch (activatedCoursesError) {
       console.error('Error removing course from activated courses:', activatedCoursesError);
-      // Продолжаем удаление даже при ошибке
+      // Continue with deletion even if this fails
     }
     
-    // Шаг 3: Удаляем курс из избранного пользователей
+    // Step 3: Remove course from users' favorites
     try {
-      await User.updateMany(
+      const favResult = await User.updateMany(
         { favorites: id }, 
         { $pull: { favorites: id } }
       );
+      console.log('Remove from favorites result:', favResult);
     } catch (favoritesError) {
       console.error('Error removing course from favorites:', favoritesError);
-      // Продолжаем удаление даже при ошибке
+      // Continue with deletion even if this fails
     }
     
-    // Шаг 4: Удаляем сам курс
+    // Step 4: Delete the course itself
     try {
-      await Course.findByIdAndDelete(id);
+      const deleteResult = await Course.findByIdAndDelete(id);
+      if (!deleteResult) {
+        console.warn('Course not found during final deletion step');
+      }
+      console.log('Course deletion result:', deleteResult ? 'Success' : 'Not found');
     } catch (courseDeletionError) {
       console.error('Error deleting course:', courseDeletionError);
       return NextResponse.json({ 
@@ -212,6 +251,7 @@ async function deleteCourse(req: NextRequest, { params }: Params) {
       }, { status: 500 });
     }
     
+    // Prepare response
     const response = { 
       message: 'Курс успешно удален',
       deletedCourseId: id,
@@ -219,9 +259,20 @@ async function deleteCourse(req: NextRequest, { params }: Params) {
     };
     
     console.log('Successfully deleted course:', response);
-    return NextResponse.json(response);
+    
+    // Ensure we return a proper JSON response
+    try {
+      return new NextResponse(JSON.stringify(response), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (responseError) {
+      console.error('Error creating JSON response:', responseError);
+      // Fallback to simple text response if JSON fails
+      return new NextResponse('Курс успешно удален', { status: 200 });
+    }
   } catch (error: any) {
-    console.error('Error deleting course:', error);
+    console.error('Unexpected error during course deletion:', error);
     return NextResponse.json({ 
       error: error.message || 'Не удалось удалить курс',
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined

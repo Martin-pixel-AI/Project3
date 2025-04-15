@@ -189,7 +189,9 @@ export default function AdminPage() {
           let parsedError;
           try {
             parsedError = JSON.parse(errorData);
-            throw new Error(parsedError.error || `Ошибка удаления курса: ${response.status}`);
+            const errorMessage = parsedError.error || `Ошибка удаления курса: ${response.status}`;
+            const errorDetails = parsedError.details ? `\nДетали: ${parsedError.details}` : '';
+            throw new Error(`${errorMessage}${errorDetails}`);
           } catch (jsonError) {
             // Если не удается распарсить JSON, возвращаем статус ошибки
             throw new Error(`Ошибка удаления курса: ${response.status} ${response.statusText}`);
