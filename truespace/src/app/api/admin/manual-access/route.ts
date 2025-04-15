@@ -127,6 +127,17 @@ async function handler(req: NextRequest) {
     // Get updated user data
     const updatedUser = await db.collection('users').findOne({ _id: user._id });
     
+    // Make sure we have the updated user before returning
+    if (!updatedUser) {
+      return NextResponse.json({
+        message: 'Access granted, but could not retrieve updated user data',
+        changes: {
+          addedPromoCode: updatedPromoCode,
+          addedCourses: updatedCourseIds
+        }
+      });
+    }
+    
     return NextResponse.json({
       message: 'Access granted successfully',
       user: {

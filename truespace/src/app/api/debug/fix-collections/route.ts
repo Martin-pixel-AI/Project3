@@ -3,6 +3,28 @@ import dbConnect from '../../../../lib/db';
 import mongoose from 'mongoose';
 import { withAuth } from '../../../../lib/auth';
 
+// Define interfaces for the report structure
+interface CollectionInfo {
+  name: string;
+  count: number;
+}
+
+interface DiagnosticsInfo {
+  collectionNames: string[];
+  users_with_promo_codes?: number;
+  sample_user?: {
+    email: string;
+    activatedPromoCodes: string[];
+  };
+}
+
+interface ReportData {
+  promo_collections_found: CollectionInfo[];
+  diagnostics: DiagnosticsInfo;
+  fixes_applied: string[];
+  issues_found: string[];
+}
+
 async function handler(req: NextRequest) {
   try {
     await dbConnect();
@@ -35,7 +57,8 @@ async function handler(req: NextRequest) {
       hasPromoCodes,
     });
     
-    let report = {
+    // Initialize properly typed report
+    const report: ReportData = {
       promo_collections_found: [],
       diagnostics: {
         collectionNames,
