@@ -160,16 +160,25 @@ export default function CourseDetailPage() {
       console.log('Attempting to activate promo code:', code);
       console.log('For course ID:', courseId);
       
+      // Make sure we have a valid courseId
+      if (!courseId) {
+        throw new Error('Course ID is missing, cannot activate promo code');
+      }
+      
       // Activate promo code
       let response;
       try {
+        // Explicitly log what we're sending to the API
+        const requestBody = { code, courseId };
+        console.log('Sending to /api/promo/activate:', requestBody);
+        
         response = await fetch('/api/promo/activate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ code, courseId }),
+          body: JSON.stringify(requestBody),
         });
       } catch (fetchError) {
         console.error('Network error during promo activation:', fetchError);
@@ -198,6 +207,7 @@ export default function CourseDetailPage() {
         } else {
           // For other errors, throw the error message
           const errorMessage = activationData?.error || `Error ${response.status}: ${response.statusText}`;
+          console.error('Promo activation error:', errorMessage);
           throw new Error(errorMessage);
         }
       }

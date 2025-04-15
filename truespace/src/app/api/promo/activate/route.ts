@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import dbConnect from '../../../../lib/db';
-import PromoCode, { IPromoCode } from '../../../../models/PromoCode';
-import User, { IUser } from '../../../../models/User';
+import PromoCode from '../../../../models/PromoCode';
+import User from '../../../../models/User';
 import { withAuth } from '../../../../lib/auth';
 import mongoose from 'mongoose';
 import jwt, { JwtPayload } from 'jsonwebtoken';
@@ -31,8 +31,18 @@ async function handler(req: NextRequest) {
     
     // Validate input
     if (!code || !courseId) {
-      console.error('❌ Missing required fields: promoCode or courseId');
+      console.error(`❌ Missing required fields: ${!code ? 'code' : 'courseId'}`);
       return NextResponse.json({ error: 'Missing required fields: promoCode or courseId' }, { status: 400 });
+    }
+    
+    // Verify courseId format
+    let courseObjectId;
+    try {
+      courseObjectId = new mongoose.Types.ObjectId(courseId);
+      console.log(`✅ Valid course ObjectId: ${courseObjectId}`);
+    } catch (error) {
+      console.error(`❌ Invalid course ID format: ${courseId}`, error);
+      return NextResponse.json({ error: 'Invalid course ID format' }, { status: 400 });
     }
     
     // Find promo code
@@ -44,8 +54,8 @@ async function handler(req: NextRequest) {
     
     console.log('Promo code found:', { 
       code, 
-      courseIds: promoCode.courseIds,
-      courseCount: promoCode.courseIds.length,
+      courseIds: promoCode.courseIds?.map((id: mongoose.Types.ObjectId) => id.toString()),
+      courseCount: promoCode.courseIds?.length || 0,
       expiresAt: promoCode.expiresAt,
       maxUses: promoCode.maxUses,
       currentUses: promoCode.uses,
@@ -58,9 +68,27 @@ async function handler(req: NextRequest) {
       return NextResponse.json({ error: 'Promo code is expired or has reached maximum uses' }, { status: 400 });
     }
     
-    // Проверяем, связан ли промокод с конкретным курсом
-    if (promoCode.courseIds.length > 0 && promoCode.courseIds[0].toString() !== courseId) {
-      console.error(`❌ Promo code is for course ${promoCode.courseIds[0]}, but was used for course ${courseId}`);
+    // Verify the promo code is for this course
+    const courseIdStr = courseId.toString();
+    const promoCourseIdsStr = promoCode.courseIds?.map((id: mongoose.Types.ObjectId) => id.toString()) || [];
+    
+    console.log('Checking promo code for course:', { 
+      courseId: courseIdStr,
+      promoCourseIds: promoCourseIdsStr,
+      isTargetedPromo: promoCourseIdsStr.length > 0
+    });
+    
+    // If the promo code is targeted (has specific courses) and doesn't include this course
+    if (promoCourseIdsStr.length > 0 && !promoCourseIdsStr.includes(courseIdStr)) {
+      console.error(`❌ Promo code ${code} is not valid for course ${courseIdStr}`);
+      
+      // More detailed logging to diagnose the issue
+      console.log('Course ID comparison results:', promoCourseIdsStr.map((id: string) => ({
+        promoCourseId: id,
+        requestedCourseId: courseIdStr,
+        matches: id === courseIdStr
+      })));
+      
       return NextResponse.json({ error: 'Promo code is not valid for this course' }, { status: 400 });
     }
     
@@ -109,23 +137,12 @@ async function handler(req: NextRequest) {
       console.log(`ℹ️ User ${userIdFromToken} already has access to course ${courseId}`);
     }
     
-    // Ensure courseId is a valid ObjectId
-    let courseObjectId;
-    try {
-      courseObjectId = new mongoose.Types.ObjectId(courseId);
-      console.log(`✅ Valid course ObjectId: ${courseObjectId}`);
-    } catch (error) {
-      console.error(`❌ Invalid course ID format: ${courseId}`, error);
-      return NextResponse.json({ error: 'Invalid course ID format' }, { status: 400 });
-    }
-    
     // Activate promo code for user
     console.log(`⏳ Updating user ${userIdFromToken} with new activated promo code ${code} and course ${courseId}`);
     const activatedPromoCodes = user.activatedPromoCodes || [];
     
     try {
-      // Convert courseId to ObjectId
-      const courseObjectId = new mongoose.Types.ObjectId(courseId);
+      // Convert courseId to ObjectId (already done above)
       
       // Log the data that we'll be updating
       console.log('Update data:', {
@@ -219,7 +236,7 @@ async function handler(req: NextRequest) {
         }
       }
       
-      // Если промокод одноразовый, деактивируем его
+      // If the promo code is one-time use, deactivate it
       if (promoCode.isOneTime) {
         console.log(`⏳ Deactivating one-time promo code ${code}`);
         await PromoCode.updateOne(
@@ -235,7 +252,7 @@ async function handler(req: NextRequest) {
       }, { status: 500 });
     }
 
-    // Возвращаем успех
+    // Return success
     console.log(`🎉 Successfully activated promo code ${code} for user ${userIdFromToken} and course ${courseId}`);
     return NextResponse.json(
       { 

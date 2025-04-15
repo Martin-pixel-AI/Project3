@@ -23,15 +23,30 @@ const PromoCodeForm: React.FC<PromoCodeFormProps> = ({ onSubmit, courseId }) => 
       return;
     }
     
+    if (!courseId) {
+      setError('Error: No course ID provided. Please try reloading the page.');
+      console.error('PromoCodeForm error: No courseId provided');
+      return;
+    }
+    
     setLoading(true);
     
     try {
       console.log(`Submitting promo code ${code} for course ${courseId || 'N/A'}`);
+      
+      // Attempt activation
       await onSubmit(code);
+      
+      // Activation succeeded
       setCode('');
-      setSuccess('Promo code activated successfully!');
+      setSuccess('Promo code activated successfully! Loading course content...');
+      
+      // After success message, reload the page after a short delay if necessary
+      // setTimeout(() => window.location.reload(), 3000);
     } catch (err) {
       console.error('PromoCodeForm error:', err);
+      
+      // Get the error message
       let errorMessage = 'Failed to activate promo code';
       
       if (err instanceof Error) {
@@ -40,6 +55,22 @@ const PromoCodeForm: React.FC<PromoCodeFormProps> = ({ onSubmit, courseId }) => 
         errorMessage = err;
       } else if (err && typeof err === 'object' && 'message' in err) {
         errorMessage = String((err as any).message);
+      }
+      
+      // Try to improve the error message for better user experience
+      if (errorMessage.includes('already activated')) {
+        errorMessage = 'You have already activated this promo code. The page will reload to try to access the course.';
+        // Reload after showing error
+        setTimeout(() => window.location.reload(), 3000);
+      }
+      else if (errorMessage.includes('not valid for this course')) {
+        errorMessage = 'This promo code cannot be used for this course. Please check if you have the correct code.';
+      }
+      else if (errorMessage.includes('expired')) {
+        errorMessage = 'This promo code has expired. Please contact support for assistance.';
+      }
+      else if (errorMessage.includes('reached maximum uses')) {
+        errorMessage = 'This promo code has reached its maximum number of uses. Please contact support for assistance.';
       }
       
       setError(errorMessage);
