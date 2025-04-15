@@ -4,8 +4,12 @@ import PromoCode from '../../../../models/PromoCode';
 import User from '../../../../models/User';
 import { withAuth } from '../../../../lib/auth';
 import mongoose from 'mongoose';
+import jwt, { JwtPayload } from 'jsonwebtoken';
+import { ObjectId } from 'mongodb';
 
 async function handler(req: NextRequest) {
+  console.log('🔍 [POST] [/api/promo/activate] Activating promo code...');
+  
   try {
     await dbConnect();
     
@@ -20,22 +24,22 @@ async function handler(req: NextRequest) {
       }, { status: 400 });
     }
     
-    const { code } = body;
+    const { code, courseId } = body;
     const userId = (req as any).user.id;
     
     console.log('Promo code activation request:', { code, userId });
     
     // Validate input
-    if (!code) {
-      console.log('No promo code provided');
-      return NextResponse.json({ error: 'Promo code is required' }, { status: 400 });
+    if (!code || !courseId) {
+      console.error('❌ Missing required fields: promoCode or courseId');
+      return NextResponse.json({ error: 'Missing required fields: promoCode or courseId' }, { status: 400 });
     }
     
     // Find promo code
     const promoCode = await PromoCode.findOne({ code });
     if (!promoCode) {
-      console.log('Invalid promo code:', code);
-      return NextResponse.json({ error: 'Invalid promo code' }, { status: 400 });
+      console.error(`❌ Promo code "${code}" not found or inactive`);
+      return NextResponse.json({ error: 'Invalid or inactive promo code' }, { status: 400 });
     }
     
     console.log('Promo code found:', { 
@@ -54,129 +58,97 @@ async function handler(req: NextRequest) {
       return NextResponse.json({ error: 'Promo code is expired or has reached maximum uses' }, { status: 400 });
     }
     
-    // Увеличиваем таймаут для MongoDb операций
-    mongoose.connection.setMaxListeners(50);
+    // Проверяем, связан ли промокод с конкретным курсом
+    if (promoCode.courseIds.length > 0 && promoCode.courseIds[0].toString() !== courseId) {
+      console.error(`❌ Promo code is for course ${promoCode.courseIds[0]}, but was used for course ${courseId}`);
+      return NextResponse.json({ error: 'Promo code is not valid for this course' }, { status: 400 });
+    }
+    
+    // Извлекаем токен из заголовков для аутентификации
+    const authHeader = req.headers.get('Authorization');
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error('❌ Missing or invalid Authorization header');
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
 
-    // Find user
-    const user = await User.findById(userId);
+    const token = authHeader.split(' ')[1];
+    
+    // Проверяем токен и получаем данные пользователя
+    let userIdFromToken;
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as JwtPayload;
+      userIdFromToken = decoded.userId;
+      console.log(`🔐 Authenticated user: ${userIdFromToken}`);
+    } catch (error) {
+      console.error('❌ JWT verification failed:', error);
+      return NextResponse.json({ error: 'Invalid authentication token' }, { status: 401 });
+    }
+    
+    // Получаем пользователя из базы данных
+    const user = await User.findById(userIdFromToken);
     if (!user) {
-      console.log('User not found:', userId);
+      console.error(`❌ User not found: ${userIdFromToken}`);
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
     
-    // Ensure activatedCourses is initialized
-    if (!user.activatedCourses) {
-      console.log('Initializing empty activatedCourses array for user:', userId);
-      user.activatedCourses = [];
-    }
-
-    // Получаем информацию о курсах из промокода
-    const Course = mongoose.model('Course');
-    const coursesToActivate = await Course.find({
-      _id: { $in: promoCode.courseIds }
-    }).select('_id title');
-
-    console.log('Courses to activate:', coursesToActivate.map(c => ({ id: c._id.toString(), title: c.title })));
+    // Проверяем, активировал ли пользователь уже этот промокод
+    const userHasPromo = user.activatedPromoCodes?.includes(code);
     
-    // Explicit conversion of ObjectId to strings for reliable comparison
-    const userActivatedCoursesStrings = user.activatedCourses.map(
-      (id: mongoose.Types.ObjectId) => id.toString()
-    );
-    
-    console.log('Current user activated courses:', userActivatedCoursesStrings);
-    
-    // Convert promo code courseIds to strings
-    const promoCodeCourseIdStrings = promoCode.courseIds.map(
-      (id: mongoose.Types.ObjectId) => id.toString()
-    );
-    
-    console.log('Promo code course IDs:', promoCodeCourseIdStrings);
-    
-    // Find courses to add (ones user doesn't already have)
-    const coursesToAddStrings = promoCodeCourseIdStrings.filter(
-      (courseId: string) => !userActivatedCoursesStrings.includes(courseId)
-    );
-    
-    console.log('Courses to add:', coursesToAddStrings);
-
-    if (coursesToAddStrings.length === 0) {
-      console.log('User already has access to all courses in this promo code');
-      return NextResponse.json({ 
-        message: 'You already have access to all courses in this promo code',
-        activatedCourses: userActivatedCoursesStrings,
-        alreadyActivated: true
-      });
+    if (userHasPromo) {
+      console.error(`❌ User ${userIdFromToken} has already activated promo code ${code}`);
+      return NextResponse.json({ error: 'Promo code already activated by this user' }, { status: 400 });
     }
     
-    // Convert string IDs back to ObjectId for storage
-    const coursesToAdd = coursesToAddStrings.map(
-      (courseIdString: string) => new mongoose.Types.ObjectId(courseIdString)
-    );
+    // Активируем промокод для пользователя
+    console.log(`⏳ Updating user ${userIdFromToken} with new activated promo code ${code}`);
+    const activatedPromoCodes = user.activatedPromoCodes || [];
     
-    // Add courses directly using $addToSet to avoid duplicates
     const updateResult = await User.updateOne(
-      { _id: userId },
+      { _id: userIdFromToken },
       { 
-        $addToSet: { activatedCourses: { $each: coursesToAdd } },
-        $set: { promoCode: code } // Save the last used promo code
+        $set: { 
+          activatedPromoCodes: [...activatedPromoCodes, code],
+        },
+        $addToSet: { 
+          activatedCourses: new mongoose.Types.ObjectId(courseId) 
+        }
       }
     );
     
-    console.log('User update result:', updateResult);
+    console.log(`📊 User update result: ${JSON.stringify(updateResult)}`);
 
-    // Запрашиваем обновленную информацию пользователя чтобы убедиться, что данные сохранились
-    const updatedUser = await User.findById(userId);
-    const updatedActivatedCourses = updatedUser?.activatedCourses?.map(
-      (id: mongoose.Types.ObjectId) => id.toString()
-    ) || [];
-
-    // Проверяем, были ли фактически добавлены курсы
-    const actuallyAdded = coursesToAddStrings.filter(
-      (courseId: string) => updatedActivatedCourses.includes(courseId)
-    );
-
-    console.log('Actually added courses:', actuallyAdded);
-    
-    // Log the final state 
-    console.log('Final activatedCourses state:', {
-      activatedCourses: updatedActivatedCourses,
-      count: updatedActivatedCourses.length,
-      actuallyAddedCount: actuallyAdded.length
-    });
-    
-    // Increment promo code uses only if at least one course was added
-    if (actuallyAdded.length > 0) {
-      try {
-        promoCode.uses += 1;
-        await promoCode.save();
-        console.log('Promo code uses incremented and saved');
-      } catch (saveError) {
-        console.error('Error saving promo code uses:', saveError);
-        // Continue execution even if incrementing fails
-      }
+    if (updateResult.modifiedCount === 0) {
+      console.error(`❌ Failed to update user record for ${userIdFromToken}`);
+      return NextResponse.json({ error: 'Failed to update user record' }, { status: 500 });
     }
-    
-    // Return detailed success response
-    const response = { 
-      message: 'Promo code activated successfully',
-      activatedCourses: updatedActivatedCourses,
-      activatedCoursesCount: updatedActivatedCourses.length,
-      promoCodeCourses: promoCodeCourseIdStrings,
-      promoCodeCoursesCount: promoCodeCourseIdStrings.length,
-      coursesAdded: actuallyAdded,
-      coursesAddedCount: actuallyAdded.length,
-      courses: coursesToActivate.map(c => ({ id: c._id.toString(), title: c.title }))
-    };
-    
-    console.log('Sending success response:', JSON.stringify(response).substring(0, 200) + '...');
-    return NextResponse.json(response);
+
+    // Если промокод одноразовый, деактивируем его
+    if (promoCode.isOneTime) {
+      console.log(`⏳ Deactivating one-time promo code ${code}`);
+      await PromoCode.updateOne(
+        { _id: promoCode._id },
+        { $set: { isActive: false } }
+      );
+    }
+
+    // Возвращаем успех
+    console.log(`🎉 Successfully activated promo code ${code} for user ${userIdFromToken} and course ${courseId}`);
+    return NextResponse.json(
+      { 
+        success: true, 
+        message: 'Promo code activated successfully',
+        courseId
+      },
+      { status: 200 }
+    );
     
   } catch (error: any) {
-    console.error('Promo code activation error:', error);
-    return NextResponse.json({ 
-      error: error.message || 'Failed to activate promo code',
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined 
-    }, { status: 500 });
+    console.error('❌ Error activating promo code:', error);
+    return NextResponse.json(
+      { error: 'An error occurred: ' + error.message },
+      { status: 500 }
+    );
   }
 }
 

@@ -192,11 +192,21 @@ export default function CourseDetailPage() {
       
       console.log('Promo code activation response:', activationData);
       
+      // Enhanced logging for troubleshooting
+      console.log('User auth state:', { isAuthenticated: !!token, userId: localStorage.getItem('userId') });
+      console.log('Course access check before timeout:', { 
+        courseId, 
+        isLocked, 
+        showVideoPlayer,
+        hasVideos: course?.videos && course.videos.length > 0 
+      });
+      
       // После успешной активации промокода делаем небольшую паузу
       // чтобы изменения в базе данных успели применится
       setTimeout(async () => {
         try {
           console.log('Fetching updated course data after promo activation');
+          console.log('Auth token for course fetch:', token ? `${token.substring(0, 15)}...` : 'No token');
           
           // Делаем повторный запрос полных данных курса
           const fullCourseResponse = await fetch(`/api/courses/${courseId}`, {
@@ -218,7 +228,14 @@ export default function CourseDetailPage() {
             throw new Error('Invalid response format from server');
           }
           
-          console.log('Course data after promo activation:', fullCourseData);
+          console.log('Course data after promo activation:', {
+            courseId: fullCourseData?.course?._id,
+            title: fullCourseData?.course?.title,
+            hasAccess: fullCourseData?.hasAccess,
+            videoCount: fullCourseData?.course?.videos?.length || 0,
+            isUser: fullCourseData?.isUser,
+            isAdmin: fullCourseData?.isAdmin
+          });
           
           if (fullCourseData && fullCourseData.course) {
             console.log('Updating UI with new course data');
@@ -243,7 +260,7 @@ export default function CourseDetailPage() {
           alert('Промокод был активирован, но произошла ошибка при загрузке видео. Страница будет перезагружена.');
           window.location.reload();
         }
-      }, 1000); // Уменьшаем задержку с 5 секунд до 1 секунды для более быстрого обновления UI
+      }, 3000); // Увеличиваем задержку с 1 секунды до 3 секунд для гарантированного обновления данных в базе
       
     } catch (err) {
       console.error('Error activating promo code:', err);
