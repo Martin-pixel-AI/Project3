@@ -57,14 +57,28 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
     });
     
     // Find course with populated videos
-    const course = await Course.findById(id).populate({
-      path: 'videos',
-      options: { sort: { order: 1 } }
-    });
+    let course;
+    try {
+      course = await Course.findById(id).populate({
+        path: 'videos',
+        options: { sort: { order: 1 } }
+      });
+    } catch (findError) {
+      console.error('Error finding course:', findError);
+      return NextResponse.json({ 
+        error: 'Database error while finding course', 
+        details: process.env.NODE_ENV === 'development' ? (findError as Error).message : undefined 
+      }, { status: 500 });
+    }
     
     if (!course) {
       console.log('Course not found:', id);
       return NextResponse.json({ error: 'Course not found' }, { status: 404 });
+    }
+    
+    // Ensure videos array exists
+    if (!course.videos) {
+      course.videos = [];
     }
     
     console.log('Course found:', { 
@@ -77,7 +91,13 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
     if (hasDirectAccessOverride) {
       console.log('Direct access override granted for course:', id);
       // Ensure we're returning a serializable object
-      const serializedCourse = course.toObject ? course.toObject() : course;
+      const serializedCourse = course.toObject ? course.toObject() : JSON.parse(JSON.stringify(course));
+      
+      // Ensure videos array exists
+      if (!serializedCourse.videos) {
+        serializedCourse.videos = [];
+      }
+      
       return NextResponse.json({ 
         course: serializedCourse,
         accessMethod: 'direct_access_token'
@@ -88,13 +108,29 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
     if (userType === 'admin') {
       console.log('Admin access granted for course:', id);
       // Ensure we're returning a serializable object
-      const serializedCourse = course.toObject ? course.toObject() : course;
+      const serializedCourse = course.toObject ? course.toObject() : JSON.parse(JSON.stringify(course));
+      
+      // Ensure videos array exists
+      if (!serializedCourse.videos) {
+        serializedCourse.videos = [];
+      }
+      
       return NextResponse.json({ course: serializedCourse });
     }
     
     // Для обычных пользователей проверяем доступ
     // Check if user has access to this course
-    const user = await User.findById(userId);
+    let user;
+    try {
+      user = await User.findById(userId);
+    } catch (userError) {
+      console.error('Error finding user:', userError);
+      return NextResponse.json({ 
+        error: 'Database error while finding user', 
+        details: process.env.NODE_ENV === 'development' ? (userError as Error).message : undefined 
+      }, { status: 500 });
+    }
+    
     if (!user) {
       console.log('User not found:', userId);
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -157,15 +193,27 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
       if (!db) {
         console.error('Database connection not established for direct query');
       } else {
-        const userRecord = await db.collection('users').findOne({
-          _id: new mongoose.Types.ObjectId(userId),
-          activatedCourses: new mongoose.Types.ObjectId(cleanCourseId)
-        });
+        let userRecord;
+        try {
+          userRecord = await db.collection('users').findOne({
+            _id: new mongoose.Types.ObjectId(userId),
+            activatedCourses: new mongoose.Types.ObjectId(cleanCourseId)
+          });
+        } catch (directQueryError) {
+          console.error('Error in direct DB query:', directQueryError);
+        }
         
         if (userRecord) {
           console.log('Direct DB query found access! User has access to the course.');
           // Continue with access
-          const serializedCourse = course.toObject ? course.toObject() : course;
+          // Ensure we're returning a serializable object with existing videos
+          const serializedCourse = course.toObject ? course.toObject() : JSON.parse(JSON.stringify(course));
+          
+          // Ensure videos array exists
+          if (!serializedCourse.videos) {
+            serializedCourse.videos = [];
+          }
+          
           return NextResponse.json({ 
             course: serializedCourse,
             accessMethod: 'direct_query'
@@ -174,18 +222,28 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
         
         // EMERGENCY FIX: Check if user has activated promo codes
         console.log('Checking for activated promo codes as emergency fallback...');
-        const userWithPromoCodes = await db.collection('users').findOne({
-          _id: new mongoose.Types.ObjectId(userId)
-        });
+        let userWithPromoCodes;
+        try {
+          userWithPromoCodes = await db.collection('users').findOne({
+            _id: new mongoose.Types.ObjectId(userId)
+          });
+        } catch (promoQueryError) {
+          console.error('Error checking for promo codes:', promoQueryError);
+        }
         
         if (userWithPromoCodes && userWithPromoCodes.activatedPromoCodes && userWithPromoCodes.activatedPromoCodes.length > 0) {
           console.log('User has activated promo codes:', userWithPromoCodes.activatedPromoCodes);
           
           // Check if there's a promo code that grants access to this course
-          const promoCodesForCourse = await db.collection('promocodes').find({
-            code: { $in: userWithPromoCodes.activatedPromoCodes },
-            courseIds: new mongoose.Types.ObjectId(cleanCourseId)
-          }).toArray();
+          let promoCodesForCourse;
+          try {
+            promoCodesForCourse = await db.collection('promocodes').find({
+              code: { $in: userWithPromoCodes.activatedPromoCodes },
+              courseIds: new mongoose.Types.ObjectId(cleanCourseId)
+            }).toArray();
+          } catch (promoCoursesError) {
+            console.error('Error finding promo codes for course:', promoCoursesError);
+          }
           
           if (promoCodesForCourse && promoCodesForCourse.length > 0) {
             console.log('Found matching promo codes for this course:', 
@@ -208,7 +266,14 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
             }
             
             // Return the course
-            const serializedCourse = course.toObject ? course.toObject() : course;
+            // Ensure we're returning a serializable object with existing videos
+            const serializedCourse = course.toObject ? course.toObject() : JSON.parse(JSON.stringify(course));
+            
+            // Ensure videos array exists
+            if (!serializedCourse.videos) {
+              serializedCourse.videos = [];
+            }
+            
             return NextResponse.json({ 
               course: serializedCourse,
               accessMethod: 'emergency_promo_fix',
@@ -232,7 +297,13 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
     
     console.log('Access granted for course:', id);
     // Ensure we're returning a serializable object
-    const serializedCourse = course.toObject ? course.toObject() : course;
+    const serializedCourse = course.toObject ? course.toObject() : JSON.parse(JSON.stringify(course));
+    
+    // Ensure videos array exists
+    if (!serializedCourse.videos) {
+      serializedCourse.videos = [];
+    }
+    
     return NextResponse.json({ 
       course: serializedCourse,
       hasAccess: true,
