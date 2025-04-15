@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import dbConnect from '../../../../lib/db';
 import Course from '../../../../models/Course';
-import User from '../../../../models/User';
+import User, { IUser } from '../../../../models/User';
 import { withAuth } from '../../../../lib/auth';
 import mongoose from 'mongoose';
 
@@ -99,7 +99,7 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
     
     // Convert ObjectIDs to strings for correct comparison
     const userActivatedCoursesStrings = user.activatedCourses.map(
-      (courseId: mongoose.Types.ObjectId) => courseId.toString()
+      (courseItem: mongoose.Types.ObjectId) => courseItem.toString()
     );
     
     // Also check if courseId needs cleaning (sometimes IDs can have different formats)

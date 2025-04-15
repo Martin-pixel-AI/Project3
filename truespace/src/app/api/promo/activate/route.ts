@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import dbConnect from '../../../../lib/db';
-import PromoCode from '../../../../models/PromoCode';
-import User from '../../../../models/User';
+import PromoCode, { IPromoCode } from '../../../../models/PromoCode';
+import User, { IUser } from '../../../../models/User';
 import { withAuth } from '../../../../lib/auth';
 import mongoose from 'mongoose';
 import jwt, { JwtPayload } from 'jsonwebtoken';
@@ -102,7 +102,7 @@ async function handler(req: NextRequest) {
     
     // Check if user already has access to the course
     const userAlreadyHasCourse = user.activatedCourses?.some(
-      (course) => course.toString() === courseId
+      (courseItem: mongoose.Types.ObjectId) => courseItem.toString() === courseId
     );
     
     if (userAlreadyHasCourse) {
@@ -156,12 +156,12 @@ async function handler(req: NextRequest) {
       } else {
         console.log('Updated user:', {
           activatedPromoCodes: updatedUser.activatedPromoCodes,
-          activatedCourses: updatedUser.activatedCourses?.map(c => c.toString())
+          activatedCourses: updatedUser.activatedCourses?.map((courseItem: mongoose.Types.ObjectId) => courseItem.toString())
         });
         
         // Double-check the course was added
         const courseWasAdded = updatedUser.activatedCourses?.some(
-          (course) => course.toString() === courseId
+          (courseItem: mongoose.Types.ObjectId) => courseItem.toString() === courseId
         );
         
         if (!courseWasAdded) {
@@ -205,4 +205,4 @@ async function handler(req: NextRequest) {
   }
 }
 
-export const POST = withAuth(handler); 
+export const POST = withAuth(handler);
