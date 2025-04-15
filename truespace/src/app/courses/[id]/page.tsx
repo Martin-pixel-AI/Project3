@@ -201,34 +201,69 @@ export default function CourseDetailPage() {
         hasVideos: course?.videos && course.videos.length > 0 
       });
       
-      // После успешной активации промокода делаем небольшую паузу
-      // чтобы изменения в базе данных успели применится
+      // After successful activation, we need to wait for database changes to propagate
+      // The delay was increased from 1 to 3 seconds, but we'll increase it further to 5 seconds
+      // to ensure database changes are fully applied
+      console.log(`Waiting 5 seconds for database changes to propagate...`);
       setTimeout(async () => {
         try {
           console.log('Fetching updated course data after promo activation');
           console.log('Auth token for course fetch:', token ? `${token.substring(0, 15)}...` : 'No token');
           
-          // Делаем повторный запрос полных данных курса
-          const fullCourseResponse = await fetch(`/api/courses/${courseId}`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          });
+          // Making multiple attempts to fetch the course data in case of database replication lag
+          let fetchAttempts = 0;
+          const maxAttempts = 3;
+          let fullCourseData = null;
           
-          if (!fullCourseResponse.ok) {
-            throw new Error(`Failed to fetch course data: ${fullCourseResponse.status}`);
+          while (fetchAttempts < maxAttempts && !fullCourseData?.course?.videos?.length) {
+            fetchAttempts++;
+            console.log(`Attempt ${fetchAttempts} to fetch course data...`);
+            
+            // Делаем повторный запрос полных данных курса
+            const fullCourseResponse = await fetch(`/api/courses/${courseId}`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+              // Adding cache control to prevent cached responses
+              cache: 'no-store',
+            });
+            
+            if (!fullCourseResponse.ok) {
+              console.error(`Failed fetch attempt ${fetchAttempts}: ${fullCourseResponse.status}`);
+              if (fetchAttempts === maxAttempts) {
+                throw new Error(`Failed to fetch course data: ${fullCourseResponse.status}`);
+              }
+              // Wait 2 seconds between attempts
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              continue;
+            }
+            
+            try {
+              fullCourseData = await fullCourseResponse.json();
+              console.log(`Fetch attempt ${fetchAttempts} response:`, fullCourseData);
+            } catch (jsonError) {
+              console.error(`Error parsing JSON in attempt ${fetchAttempts}:`, jsonError);
+              if (fetchAttempts === maxAttempts) {
+                throw new Error('Invalid response format from server');
+              }
+              // Wait 2 seconds between attempts
+              await new Promise(resolve => setTimeout(resolve, 2000));
+              continue;
+            }
+            
+            // If we have videos, we can stop trying
+            if (fullCourseData?.course?.videos?.length) {
+              console.log(`Successfully received course data with videos on attempt ${fetchAttempts}`);
+              break;
+            } else {
+              console.log(`No videos in response, trying again in 2 seconds...`);
+              // Wait 2 seconds between attempts
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
           }
           
-          let fullCourseData;
-          try {
-            fullCourseData = await fullCourseResponse.json();
-          } catch (jsonError) {
-            console.error('Error parsing JSON response:', jsonError);
-            throw new Error('Invalid response format from server');
-          }
-          
-          console.log('Course data after promo activation:', {
+          console.log('Final course data after promo activation:', {
             courseId: fullCourseData?.course?._id,
             title: fullCourseData?.course?.title,
             hasAccess: fullCourseData?.hasAccess,
@@ -237,30 +272,31 @@ export default function CourseDetailPage() {
             isAdmin: fullCourseData?.isAdmin
           });
           
-          if (fullCourseData && fullCourseData.course) {
-            console.log('Updating UI with new course data');
+          if (fullCourseData && fullCourseData.course && fullCourseData.course.videos?.length > 0) {
+            console.log('Updating UI with new course data that includes videos');
             setCourse(fullCourseData.course);
             
             // Если получили видео, значит курс доступен
             setIsLocked(false);
-            setShowVideoPlayer(fullCourseData.course.videos?.length > 0);
+            setShowVideoPlayer(true);
             
             // Устанавливаем первое видео как выбранное
-            if (fullCourseData.course.videos?.length) {
-              setSelectedVideo(fullCourseData.course.videos[0]);
-            }
+            setSelectedVideo(fullCourseData.course.videos[0]);
           } else {
-            console.error('Failed to get updated course data:', fullCourseData?.error || 'No course data returned');
-            // Если не удалось получить полную информацию о курсе, обновляем страницу
-            alert('Промокод был активирован, но не удалось загрузить данные курса. Страница будет перезагружена.');
-            window.location.reload();
+            console.error('Failed to get course with videos:', fullCourseData?.error || 'No videos returned');
+            alert('Промокод был активирован, но курс всё ещё недоступен. Пожалуйста, обновите страницу или обратитесь в поддержку.');
+            
+            // Force page reload after a short delay
+            setTimeout(() => {
+              window.location.reload();
+            }, 1500);
           }
         } catch (error) {
           console.error('Error fetching course after promo activation:', error);
           alert('Промокод был активирован, но произошла ошибка при загрузке видео. Страница будет перезагружена.');
           window.location.reload();
         }
-      }, 3000); // Увеличиваем задержку с 1 секунды до 3 секунд для гарантированного обновления данных в базе
+      }, 5000); // Increasing delay from 3 seconds to 5 seconds for more reliable database updates
       
     } catch (err) {
       console.error('Error activating promo code:', err);

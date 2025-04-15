@@ -27,7 +27,7 @@ async function handler(req: NextRequest) {
     const { code, courseId } = body;
     const userId = (req as any).user.id;
     
-    console.log('Promo code activation request:', { code, userId });
+    console.log('Promo code activation request:', { code, courseId, userId });
     
     // Validate input
     if (!code || !courseId) {
@@ -100,36 +100,89 @@ async function handler(req: NextRequest) {
       return NextResponse.json({ error: 'Promo code already activated by this user' }, { status: 400 });
     }
     
-    // Активируем промокод для пользователя
-    console.log(`⏳ Updating user ${userIdFromToken} with new activated promo code ${code}`);
-    const activatedPromoCodes = user.activatedPromoCodes || [];
-    
-    const updateResult = await User.updateOne(
-      { _id: userIdFromToken },
-      { 
-        $set: { 
-          activatedPromoCodes: [...activatedPromoCodes, code],
-        },
-        $addToSet: { 
-          activatedCourses: new mongoose.Types.ObjectId(courseId) 
-        }
-      }
+    // Check if user already has access to the course
+    const userAlreadyHasCourse = user.activatedCourses?.some(
+      (course) => course.toString() === courseId
     );
     
-    console.log(`📊 User update result: ${JSON.stringify(updateResult)}`);
-
-    if (updateResult.modifiedCount === 0) {
-      console.error(`❌ Failed to update user record for ${userIdFromToken}`);
-      return NextResponse.json({ error: 'Failed to update user record' }, { status: 500 });
+    if (userAlreadyHasCourse) {
+      console.log(`ℹ️ User ${userIdFromToken} already has access to course ${courseId}`);
     }
+    
+    // Ensure courseId is a valid ObjectId
+    let courseObjectId;
+    try {
+      courseObjectId = new mongoose.Types.ObjectId(courseId);
+      console.log(`✅ Valid course ObjectId: ${courseObjectId}`);
+    } catch (error) {
+      console.error(`❌ Invalid course ID format: ${courseId}`, error);
+      return NextResponse.json({ error: 'Invalid course ID format' }, { status: 400 });
+    }
+    
+    // Активируем промокод для пользователя
+    console.log(`⏳ Updating user ${userIdFromToken} with new activated promo code ${code} and course ${courseId}`);
+    const activatedPromoCodes = user.activatedPromoCodes || [];
+    
+    try {
+      const updateResult = await User.updateOne(
+        { _id: userIdFromToken },
+        { 
+          $set: { 
+            activatedPromoCodes: [...activatedPromoCodes, code],
+          },
+          $addToSet: { 
+            activatedCourses: courseObjectId
+          }
+        }
+      );
+      
+      console.log(`📊 User update result: ${JSON.stringify(updateResult)}`);
 
-    // Если промокод одноразовый, деактивируем его
-    if (promoCode.isOneTime) {
-      console.log(`⏳ Deactivating one-time promo code ${code}`);
+      if (updateResult.modifiedCount === 0) {
+        console.error(`❌ Failed to update user record for ${userIdFromToken}`);
+        return NextResponse.json({ error: 'Failed to update user record' }, { status: 500 });
+      }
+      
+      // Increment uses counter for the promo code
       await PromoCode.updateOne(
         { _id: promoCode._id },
-        { $set: { isActive: false } }
+        { $inc: { uses: 1 } }
       );
+      
+      // Verify the update was successful by reading the user again
+      const updatedUser = await User.findById(userIdFromToken);
+      if (!updatedUser) {
+        console.error(`❌ Couldn't verify user update for ${userIdFromToken}`);
+      } else {
+        console.log('Updated user:', {
+          activatedPromoCodes: updatedUser.activatedPromoCodes,
+          activatedCourses: updatedUser.activatedCourses?.map(c => c.toString())
+        });
+        
+        // Double-check the course was added
+        const courseWasAdded = updatedUser.activatedCourses?.some(
+          (course) => course.toString() === courseId
+        );
+        
+        if (!courseWasAdded) {
+          console.error(`❌ Course ${courseId} was not added to user's activatedCourses despite successful update!`);
+        }
+      }
+      
+      // Если промокод одноразовый, деактивируем его
+      if (promoCode.isOneTime) {
+        console.log(`⏳ Deactivating one-time promo code ${code}`);
+        await PromoCode.updateOne(
+          { _id: promoCode._id },
+          { $set: { isActive: false } }
+        );
+      }
+    } catch (dbError) {
+      console.error('❌ Database error during promo code activation:', dbError);
+      return NextResponse.json({ 
+        error: 'Database error during activation', 
+        details: (dbError as Error).message 
+      }, { status: 500 });
     }
 
     // Возвращаем успех

@@ -82,41 +82,79 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
     
-    // Убедимся, что activatedCourses - это массив
+    // Ensure activatedCourses is an array
     if (!user.activatedCourses) {
       console.log('User has no activatedCourses, initializing empty array');
       user.activatedCourses = [];
       await user.save();
     }
     
-    // Конвертируем ObjectID в строки для корректного сравнения
+    // Additional debug logging for raw data
+    console.log('Raw user data:', {
+      id: user._id,
+      email: user.email,
+      activatedCourses: user.activatedCourses,
+      activatedPromoCodes: user.activatedPromoCodes || []
+    });
+    
+    // Convert ObjectIDs to strings for correct comparison
     const userActivatedCoursesStrings = user.activatedCourses.map(
       (courseId: mongoose.Types.ObjectId) => courseId.toString()
     );
     
-    // Проверяем есть ли курс в списке активированных
-    const hasAccess = userActivatedCoursesStrings.includes(id);
+    // Also check if courseId needs cleaning (sometimes IDs can have different formats)
+    const cleanCourseId = id.toString();
     
-    console.log('Access check:', { 
+    // Check if the course is in the activated list
+    const hasAccess = userActivatedCoursesStrings.some(
+      (activatedId: string) => activatedId === cleanCourseId
+    );
+    
+    console.log('Detailed access check:', { 
       userId, 
-      courseId: id, 
+      courseId: id,
+      cleanCourseId,
       userActivatedCourses: userActivatedCoursesStrings, 
       userActivatedCoursesCount: userActivatedCoursesStrings.length,
       hasAccess,
-      // Добавляем типы данных для отладки
+      // Add data types for debugging
       courseIdType: typeof id,
       activatedCoursesTypes: userActivatedCoursesStrings.map((courseId: string) => typeof courseId),
-      // Дополнительная информация
+      // Additional information
       userInfo: {
         email: user.email,
         promoCode: user.promoCode,
-        activatedCoursesRaw: user.activatedCourses
+        activatedPromoCodes: user.activatedPromoCodes || []
       },
-      // Прямая проверка на точное совпадение
-      exactMatches: userActivatedCoursesStrings.filter((courseId: string) => courseId === id)
+      // Direct check for exact matches
+      exactMatches: userActivatedCoursesStrings.filter((courseId: string) => courseId === cleanCourseId)
     });
     
+    // If user doesn't have access normally, try a direct database query as fallback
     if (!hasAccess) {
+      console.log('Initial access check failed, trying direct DB query...');
+      // Direct MongoDB query to double-check
+      const db = mongoose.connection.db;
+      
+      if (!db) {
+        console.error('Database connection not established for direct query');
+      } else {
+        const userRecord = await db.collection('users').findOne({
+          _id: new mongoose.Types.ObjectId(userId),
+          activatedCourses: new mongoose.Types.ObjectId(cleanCourseId)
+        });
+        
+        if (userRecord) {
+          console.log('Direct DB query found access! User has access to the course.');
+          // Continue with access
+          const serializedCourse = course.toObject ? course.toObject() : course;
+          return NextResponse.json({ 
+            course: serializedCourse,
+            accessMethod: 'direct_query'
+          });
+        }
+      }
+      
       console.log('Access denied for course:', id);
       return NextResponse.json({ 
         error: 'You do not have access to this course', 
@@ -128,7 +166,11 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
     console.log('Access granted for course:', id);
     // Ensure we're returning a serializable object
     const serializedCourse = course.toObject ? course.toObject() : course;
-    return NextResponse.json({ course: serializedCourse });
+    return NextResponse.json({ 
+      course: serializedCourse,
+      hasAccess: true,
+      isUser: true
+    });
     
   } catch (error: any) {
     console.error('Get full course error:', error);
