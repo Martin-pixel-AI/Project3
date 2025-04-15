@@ -175,6 +175,12 @@ export default function AdminPage() {
       
       console.log('Attempting to delete course:', courseId);
       
+      // Show confirmation dialog with course ID
+      const confirmed = confirm(`Вы уверены, что хотите удалить курс? (ID: ${courseId})`);
+      if (!confirmed) {
+        return;
+      }
+      
       const response = await fetch(`/api/courses/${courseId}`, {
         method: 'DELETE',
         headers: {
@@ -182,18 +188,18 @@ export default function AdminPage() {
         }
       });
       
+      // Get response as text
+      const responseText = await response.text();
+      
       if (!response.ok) {
-        // Get the error as text
-        const errorText = await response.text();
-        throw new Error(errorText || `Ошибка удаления курса: ${response.status} ${response.statusText}`);
+        throw new Error(responseText || `Ошибка удаления курса: ${response.status} ${response.statusText}`);
       }
       
-      // Read response as text
-      const successText = await response.text();
-      setSuccess(successText || 'Курс успешно удален!');
+      // Success message
+      setSuccess(responseText || 'Курс успешно удален!');
       
       // Обновляем статистику после удаления
-      loadStats();
+      await loadStats();
       
     } catch (err) {
       console.error('Error deleting course:', err);

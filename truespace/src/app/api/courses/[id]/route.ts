@@ -143,45 +143,53 @@ export const POST = withAuth(getFullCourse);
 
 // Удаление курса (только для администратора)
 async function deleteCourse(req: NextRequest, { params }: Params) {
-  // Simple implementation focusing only on deleting the course itself
   try {
+    // Connect to database
     await dbConnect();
     
     const { id } = params;
     const userData = (req as any).user;
     
-    // Simple logging
-    console.log(`Deleting course ${id} requested by user ${userData.id}`);
-    
     // Check if user is admin
     if (userData.type !== 'admin') {
       return new NextResponse('Только администраторы могут удалять курсы', { status: 403 });
     }
-    
-    // Find course first to confirm it exists
-    const courseExists = await Course.findById(id);
-    if (!courseExists) {
-      return new NextResponse('Курс не найден', { status: 404 });
+
+    // Use direct MongoDB driver operations to bypass Mongoose model issues
+    const db = mongoose.connection.db;
+    if (!db) {
+      return new NextResponse('Database connection not established', { status: 500 });
     }
-    
-    // Delete the course - this is the primary operation we're testing
+
     try {
-      const result = await Course.deleteOne({ _id: id });
-      console.log('Course deletion result:', result);
-    } catch (deleteErr: any) {
-      console.error('Error in Course.deleteOne:', deleteErr);
-      return new NextResponse(`Ошибка при удалении курса: ${deleteErr.message}`, { status: 500 });
+      // Step 1: Find the course to make sure it exists
+      const course = await db.collection('courses').findOne({ 
+        _id: new mongoose.Types.ObjectId(id) 
+      });
+      
+      if (!course) {
+        return new NextResponse('Курс не найден', { status: 404 });
+      }
+      
+      // Step 2: Delete the course directly
+      const result = await db.collection('courses').deleteOne({ 
+        _id: new mongoose.Types.ObjectId(id) 
+      });
+      
+      console.log('Raw MongoDB deletion result:', result);
+      
+      if (result.deletedCount === 0) {
+        return new NextResponse('Не удалось удалить курс', { status: 500 });
+      }
+      
+      return new NextResponse('Курс успешно удален', { status: 200 });
+    } catch (dbError: any) {
+      console.error('Database operation error:', dbError);
+      return new NextResponse(`Ошибка базы данных: ${dbError.message}`, { status: 500 });
     }
-    
-    // Return a simple text response
-    return new NextResponse('Курс успешно удален', { status: 200 });
   } catch (error: any) {
     console.error('Error deleting course:', error);
-    // Return a very simple text response to avoid any serialization issues
-    return new NextResponse(
-      `Ошибка удаления курса: ${error.message}`, 
-      { status: 500 }
-    );
+    return new NextResponse(`Ошибка: ${error.message}`, { status: 500 });
   }
 }
 
