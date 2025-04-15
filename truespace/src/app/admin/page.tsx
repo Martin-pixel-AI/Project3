@@ -207,6 +207,52 @@ export default function AdminPage() {
     }
   };
   
+  // Экстренное удаление курса - вызывает специальный эндпоинт для удаления
+  const emergencyDeleteCourse = async (courseId: string) => {
+    try {
+      setError(null);
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        throw new Error('Вы не авторизованы');
+      }
+      
+      // Confirm with the user that this is a potentially destructive operation
+      const confirmed = window.confirm(
+        'ВНИМАНИЕ: Экстренное удаление курса может привести к потере связанных данных. ' +
+        'Это действие удалит курс напрямую из базы данных. Продолжить?'
+      );
+      
+      if (!confirmed) {
+        return;
+      }
+      
+      console.log('Attempting emergency delete for course:', courseId);
+      
+      const response = await fetch(`/api/emergency-delete/${courseId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      const responseText = await response.text();
+      
+      if (!response.ok) {
+        throw new Error(responseText || `Ошибка экстренного удаления: ${response.status}`);
+      }
+      
+      setSuccess(`Экстренное удаление выполнено: ${responseText}`);
+      
+      // Update stats after deletion
+      await loadStats();
+      
+    } catch (err) {
+      console.error('Error in emergency delete:', err);
+      setError(err instanceof Error ? err.message : 'Произошла ошибка при экстренном удалении');
+    }
+  };
+  
   // Check admin auth
   useEffect(() => {
     const checkAuth = async () => {
@@ -712,6 +758,13 @@ export default function AdminPage() {
                             className="px-2 py-1 bg-red-600 text-white rounded text-xs"
                           >
                             Удалить
+                          </button>
+                          <button 
+                            onClick={() => emergencyDeleteCourse(course._id)}
+                            className="px-2 py-1 bg-yellow-500 text-black rounded text-xs"
+                            title="Удаление напрямую из базы данных в случае проблем с обычным удалением"
+                          >
+                            Экстренно
                           </button>
                         </td>
                       </tr>
