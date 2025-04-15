@@ -5,12 +5,9 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Navbar from '../../../components/navigation/Navbar';
 import VideoPlayer from '../../../components/courses/VideoPlayer';
-import PromoCodeForm from '../../../components/courses/PromoCodeForm';
 import Loader from '../../../components/ui/Loader';
 import { HeartIcon } from '@heroicons/react/24/outline';
 import { HeartIcon as HeartIconSolid } from '@heroicons/react/24/solid';
-import EmergencyFix from './EmergencyFix';
-import { addDirectAccessHeader, hasDirectAccessToken } from '@/lib/directAccess';
 
 interface Video {
   _id: string;
@@ -39,7 +36,6 @@ export default function CourseDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
   const [isFavorite, setIsFavorite] = useState(false);
-  const [isLocked, setIsLocked] = useState(true);
   const [showVideoPlayer, setShowVideoPlayer] = useState(false);
   
   const courseId = params.id as string;
@@ -63,25 +59,16 @@ export default function CourseDetailPage() {
         
         const token = localStorage.getItem('token');
         if (!token) {
-          setIsLocked(true);
-          setLoading(false);
+          // Redirect to login if not logged in
+          router.push('/auth');
           return;
         }
-        
-        // Check for direct access token
-        const hasDirectAccess = hasDirectAccessToken(courseId);
         
         // Prepare headers for full course request
         let headers: Record<string, string> = {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         };
-        
-        // Add direct access token if available
-        if (hasDirectAccess) {
-          headers = addDirectAccessHeader(courseId, headers);
-          console.log('Using direct access token for course request');
-        }
         
         // Try to fetch course with videos (requires authorization)
         const fullCourseResponse = await fetch(`/api/courses/${courseId}`, {
@@ -93,22 +80,16 @@ export default function CourseDetailPage() {
           const fullCourseData = await fullCourseResponse.json();
           setCourse(fullCourseData.course);
           
-          // If we get videos, the course is unlocked
-          setIsLocked(false);
+          // Enable video player
           setShowVideoPlayer(fullCourseData.course.videos?.length > 0);
           
           // Set first video as selected if available
           if (fullCourseData.course.videos?.length) {
             setSelectedVideo(fullCourseData.course.videos[0]);
           }
-          
-          // Log if this was a direct access success
-          if (fullCourseData.accessMethod === 'direct_access_token') {
-            console.log('Successfully accessed course via direct access token');
-          }
         } else {
-          // If not authorized, course remains locked
-          setIsLocked(true);
+          // If there's an error getting full course, just show user they need to login
+          router.push('/auth');
         }
         
         // Check if course is in favorites
@@ -120,10 +101,8 @@ export default function CourseDetailPage() {
         
         if (userResponse.ok) {
           const userData = await userResponse.json();
-          // Проверяем, что userData.favorites существует перед использованием
           const favoritesArray = Array.isArray(userData.favorites) ? userData.favorites : [];
           setIsFavorite(favoritesArray.some((fav: any) => {
-            // Проверяем, является ли элемент строкой или объектом с _id
             return typeof fav === 'string' ? fav === courseId : fav && fav._id === courseId;
           }));
         }
@@ -137,7 +116,7 @@ export default function CourseDetailPage() {
     };
     
     fetchCourse();
-  }, [courseId]);
+  }, [courseId, router]);
   
   // Toggle favorite status
   const handleToggleFavorite = async () => {
@@ -165,120 +144,6 @@ export default function CourseDetailPage() {
       }
     } catch (err) {
       console.error('Error toggling favorite:', err);
-    }
-  };
-  
-  // Handle promo code submission
-  const handlePromoCodeSubmit = async (code: string) => {
-    try {
-      const token = localStorage.getItem('token');
-      
-      if (!token) {
-        router.push('/auth');
-        return;
-      }
-      
-      console.log('Attempting to activate promo code:', code);
-      console.log('For course ID:', courseId);
-      
-      // Make sure we have a valid courseId
-      if (!courseId) {
-        throw new Error('Course ID is missing, cannot activate promo code');
-      }
-      
-      // Activate promo code
-      let response;
-      try {
-        // Explicitly log what we're sending to the API
-        const requestBody = { code, courseId };
-        console.log('Sending to /api/promo/activate:', requestBody);
-        
-        response = await fetch('/api/promo/activate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(requestBody),
-        });
-      } catch (fetchError) {
-        console.error('Network error during promo activation:', fetchError);
-        throw new Error('Network error: Could not connect to server');
-      }
-      
-      console.log('Promo activation status:', response.status);
-      
-      // Get the response data even if status is not 200
-      let activationData;
-      try {
-        activationData = await response.json();
-        console.log('Promo activation response:', activationData);
-      } catch (jsonError) {
-        console.error('Error parsing activation response:', jsonError);
-        throw new Error('Invalid response format from server');
-      }
-      
-      // Check for errors in the response
-      if (!response.ok) {
-        const errorMsg = activationData.error || 'Failed to activate promo code';
-        console.error('Activation error:', errorMsg);
-        throw new Error(errorMsg);
-      }
-      
-      // Success! Reload the course data to show unlocked content
-      console.log('Promo code activated successfully!');
-      
-      // Adding a delay to ensure the database change is reflected
-      // This helps avoid race conditions where the course data might not 
-      // be immediately updated in the database
-      setTimeout(async () => {
-        try {
-          // Re-fetch the course data
-          const token = localStorage.getItem('token');
-          if (!token) return;
-          
-          const fullCourseResponse = await fetch(`/api/courses/${courseId}`, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          });
-          
-          if (fullCourseResponse.ok) {
-            const fullCourseData = await fullCourseResponse.json();
-            setCourse(fullCourseData.course);
-            
-            // If we get videos, the course is unlocked
-            setIsLocked(false);
-            setShowVideoPlayer(fullCourseData.course.videos?.length > 0);
-            
-            // Set first video as selected if available
-            if (fullCourseData.course.videos?.length) {
-              setSelectedVideo(fullCourseData.course.videos[0]);
-            }
-          } else {
-            console.error('Failed to update course data after promo activation');
-            // Try to use debug endpoint to fix access
-            await fetch('/api/debug/course-access/direct-fix', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({ courseId }),
-            });
-            // Reload the page entirely as a fallback
-            window.location.reload();
-          }
-        } catch (fetchError) {
-          console.error('Error fetching updated course data:', fetchError);
-          // Reload the entire page as a fallback
-          window.location.reload();
-        }
-      }, 1500); // 1.5 second delay
-      
-    } catch (err) {
-      console.error('Promo code activation error:', err);
-      throw err; // Re-throw to be handled by the form component
     }
   };
   
@@ -351,90 +216,12 @@ export default function CourseDetailPage() {
                 videoId={selectedVideo.youtubeUrl}
                 title={selectedVideo.title}
               />
-            ) : isLocked ? (
-              <div className="bg-background-light rounded-lg p-6 animate-fade-in">
-                <h2 className="text-xl font-semibold mb-4">
-                  This course requires a promo code
-                </h2>
-                <p className="text-text-secondary mb-6">
-                  To access this course, you need to activate it with a valid promo code.
-                </p>
-                
-                <PromoCodeForm onSubmit={handlePromoCodeSubmit} courseId={courseId} />
-                
-                {/* Emergency fix component */}
-                {localStorage.getItem('token') && (
-                  <EmergencyFix 
-                    courseId={courseId} 
-                    token={localStorage.getItem('token') || ''} 
-                  />
-                )}
-                
-                {/* Link to check access */}
-                <div className="mt-4 text-center">
-                  <button
-                    onClick={async () => {
-                      try {
-                        const token = localStorage.getItem('token');
-                        if (!token) {
-                          alert('You need to log in first');
-                          router.push('/auth');
-                          return;
-                        }
-                        
-                        const response = await fetch('/api/debug/access', {
-                          method: 'POST',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${token}`,
-                          },
-                          body: JSON.stringify({ courseId }),
-                        });
-                        
-                        const data = await response.json();
-                        console.log('Access debug data:', data);
-                        
-                        if (data.diagnostics?.shouldHaveAccess) {
-                          // User should have access, attempt to fix it
-                          const fixResponse = await fetch('/api/debug/fix-access', {
-                            method: 'POST',
-                            headers: {
-                              'Content-Type': 'application/json',
-                              Authorization: `Bearer ${token}`,
-                            },
-                            body: JSON.stringify({ courseId }),
-                          });
-                          
-                          const fixData = await fixResponse.json();
-                          console.log('Fix result:', fixData);
-                          
-                          if (fixData.fixApplied || fixData.alreadyHadAccess) {
-                            alert(`Access fixed for course "${fixData.courseName || courseId}"! Refreshing page...`);
-                            window.location.reload();
-                          } else if (fixData.error) {
-                            alert(`Could not fix access: ${fixData.error}`);
-                          } else {
-                            alert(`Access check shows you should have access. Please try refreshing the page.`);
-                            window.location.reload();
-                          }
-                        } else {
-                          alert(`Debug info: No access detected. Please try activating the promo code again.`);
-                        }
-                      } catch (err) {
-                        console.error('Debug access check error:', err);
-                        alert('Error checking access. See console for details.');
-                      }
-                    }}
-                    className="text-sm text-primary underline hover:no-underline"
-                  >
-                    Having trouble? Click here to check access
-                  </button>
-                </div>
-              </div>
             ) : (
               <div className="bg-background-light rounded-lg p-6">
                 <p className="text-center text-text-secondary">
-                  Select a video from the playlist to start watching.
+                  {!course.videos?.length 
+                    ? "No videos available for this course." 
+                    : "Select a video from the playlist to start watching."}
                 </p>
               </div>
             )}
@@ -444,13 +231,7 @@ export default function CourseDetailPage() {
           <div>
             <h2 className="text-xl font-semibold mb-4">Course Videos</h2>
             
-            {isLocked ? (
-              <div className="bg-background-light rounded-lg p-4">
-                <p className="text-text-secondary">
-                  Videos are locked. Activate a promo code to access this course.
-                </p>
-              </div>
-            ) : course.videos && course.videos.length > 0 ? (
+            {course.videos && course.videos.length > 0 ? (
               <div className="space-y-2">
                 {course.videos.map((video) => (
                   <button

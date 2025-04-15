@@ -5,7 +5,6 @@ import User, { IUser } from '../../../../models/User';
 import { withAuth } from '../../../../lib/auth';
 import mongoose from 'mongoose';
 import { getCollection, toObjectId } from '@/lib/db-utils';
-import { withDirectAccess } from '@/lib/directAccessMiddleware';
 
 interface Params {
   params: {
@@ -45,15 +44,10 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
     const userId = userData.id;
     const userType = userData.type;
     
-    // Check for direct access override
-    const directAccess = (req as any).directAccess;
-    const hasDirectAccessOverride = directAccess && directAccess.courseId === id;
-    
     console.log('getFullCourse request:', { 
       courseId: id, 
       userId, 
-      userType,
-      hasDirectAccessOverride: !!hasDirectAccessOverride
+      userType
     });
     
     // Find course with populated videos
@@ -87,23 +81,6 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
       videosCount: course.videos?.length || 0
     });
     
-    // If direct access is being used, grant access immediately
-    if (hasDirectAccessOverride) {
-      console.log('Direct access override granted for course:', id);
-      // Ensure we're returning a serializable object
-      const serializedCourse = course.toObject ? course.toObject() : JSON.parse(JSON.stringify(course));
-      
-      // Ensure videos array exists
-      if (!serializedCourse.videos) {
-        serializedCourse.videos = [];
-      }
-      
-      return NextResponse.json({ 
-        course: serializedCourse,
-        accessMethod: 'direct_access_token'
-      });
-    }
-    
     // Администратор всегда имеет доступ к полной информации о курсе
     if (userType === 'admin') {
       console.log('Admin access granted for course:', id);
@@ -118,182 +95,8 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
       return NextResponse.json({ course: serializedCourse });
     }
     
-    // Для обычных пользователей проверяем доступ
-    // Check if user has access to this course
-    let user;
-    try {
-      user = await User.findById(userId);
-    } catch (userError) {
-      console.error('Error finding user:', userError);
-      return NextResponse.json({ 
-        error: 'Database error while finding user', 
-        details: process.env.NODE_ENV === 'development' ? (userError as Error).message : undefined 
-      }, { status: 500 });
-    }
-    
-    if (!user) {
-      console.log('User not found:', userId);
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-    
-    // Ensure activatedCourses is an array
-    if (!user.activatedCourses) {
-      console.log('User has no activatedCourses, initializing empty array');
-      user.activatedCourses = [];
-      await user.save();
-    }
-    
-    // Additional debug logging for raw data
-    console.log('Raw user data:', {
-      id: user._id,
-      email: user.email,
-      activatedCourses: user.activatedCourses,
-      activatedPromoCodes: user.activatedPromoCodes || []
-    });
-    
-    // Convert ObjectIDs to strings for correct comparison
-    const userActivatedCoursesStrings = user.activatedCourses.map(
-      (courseItem: mongoose.Types.ObjectId) => courseItem.toString()
-    );
-    
-    // Also check if courseId needs cleaning (sometimes IDs can have different formats)
-    const cleanCourseId = id.toString();
-    
-    // Check if the course is in the activated list
-    const hasAccess = userActivatedCoursesStrings.some(
-      (activatedId: string) => activatedId === cleanCourseId
-    );
-    
-    console.log('Detailed access check:', { 
-      userId, 
-      courseId: id,
-      cleanCourseId,
-      userActivatedCourses: userActivatedCoursesStrings, 
-      userActivatedCoursesCount: userActivatedCoursesStrings.length,
-      hasAccess,
-      // Add data types for debugging
-      courseIdType: typeof id,
-      activatedCoursesTypes: userActivatedCoursesStrings.map((courseId: string) => typeof courseId),
-      // Additional information
-      userInfo: {
-        email: user.email,
-        promoCode: user.promoCode,
-        activatedPromoCodes: user.activatedPromoCodes || []
-      },
-      // Direct check for exact matches
-      exactMatches: userActivatedCoursesStrings.filter((courseId: string) => courseId === cleanCourseId)
-    });
-    
-    // If user doesn't have access normally, try a direct database query as fallback
-    if (!hasAccess) {
-      console.log('Initial access check failed, trying direct DB query...');
-      // Direct MongoDB query to double-check
-      const db = mongoose.connection.db;
-      
-      if (!db) {
-        console.error('Database connection not established for direct query');
-      } else {
-        let userRecord;
-        try {
-          userRecord = await db.collection('users').findOne({
-            _id: new mongoose.Types.ObjectId(userId),
-            activatedCourses: new mongoose.Types.ObjectId(cleanCourseId)
-          });
-        } catch (directQueryError) {
-          console.error('Error in direct DB query:', directQueryError);
-        }
-        
-        if (userRecord) {
-          console.log('Direct DB query found access! User has access to the course.');
-          // Continue with access
-          // Ensure we're returning a serializable object with existing videos
-          const serializedCourse = course.toObject ? course.toObject() : JSON.parse(JSON.stringify(course));
-          
-          // Ensure videos array exists
-          if (!serializedCourse.videos) {
-            serializedCourse.videos = [];
-          }
-          
-          return NextResponse.json({ 
-            course: serializedCourse,
-            accessMethod: 'direct_query'
-          });
-        }
-        
-        // EMERGENCY FIX: Check if user has activated promo codes
-        console.log('Checking for activated promo codes as emergency fallback...');
-        let userWithPromoCodes;
-        try {
-          userWithPromoCodes = await db.collection('users').findOne({
-            _id: new mongoose.Types.ObjectId(userId)
-          });
-        } catch (promoQueryError) {
-          console.error('Error checking for promo codes:', promoQueryError);
-        }
-        
-        if (userWithPromoCodes && userWithPromoCodes.activatedPromoCodes && userWithPromoCodes.activatedPromoCodes.length > 0) {
-          console.log('User has activated promo codes:', userWithPromoCodes.activatedPromoCodes);
-          
-          // Check if there's a promo code that grants access to this course
-          let promoCodesForCourse;
-          try {
-            promoCodesForCourse = await db.collection('promocodes').find({
-              code: { $in: userWithPromoCodes.activatedPromoCodes },
-              courseIds: new mongoose.Types.ObjectId(cleanCourseId)
-            }).toArray();
-          } catch (promoCoursesError) {
-            console.error('Error finding promo codes for course:', promoCoursesError);
-          }
-          
-          if (promoCodesForCourse && promoCodesForCourse.length > 0) {
-            console.log('Found matching promo codes for this course:', 
-              promoCodesForCourse.map(p => p.code)
-            );
-            
-            // User has a valid promo code for this course, grant emergency access
-            console.log('EMERGENCY ACCESS GRANTED for course:', id);
-            
-            // Add the course to the user's activatedCourses as a fix
-            try {
-              await db.collection('users').updateOne(
-                { _id: new mongoose.Types.ObjectId(userId) },
-                { $addToSet: { activatedCourses: new mongoose.Types.ObjectId(cleanCourseId) } }
-              );
-              console.log('Updated user activatedCourses with missing course ID');
-            } catch (updateError) {
-              console.error('Failed to update user with missing course:', updateError);
-              // Continue anyway to provide access this time
-            }
-            
-            // Return the course
-            // Ensure we're returning a serializable object with existing videos
-            const serializedCourse = course.toObject ? course.toObject() : JSON.parse(JSON.stringify(course));
-            
-            // Ensure videos array exists
-            if (!serializedCourse.videos) {
-              serializedCourse.videos = [];
-            }
-            
-            return NextResponse.json({ 
-              course: serializedCourse,
-              accessMethod: 'emergency_promo_fix',
-              message: 'Emergency access granted based on promo code'
-            });
-          } else {
-            console.log('No matching promo codes found for this course');
-          }
-        } else {
-          console.log('User has no activated promo codes for emergency access');
-        }
-      }
-      
-      console.log('Access denied for course:', id);
-      return NextResponse.json({ 
-        error: 'You do not have access to this course', 
-        courseId: id,
-        needsPromoCode: true 
-      }, { status: 403 });
-    }
+    // For regular users, just grant access automatically
+    // No promo code check needed anymore
     
     console.log('Access granted for course:', id);
     // Ensure we're returning a serializable object
@@ -319,7 +122,7 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
   }
 }
 
-export const POST = withDirectAccess(withAuth(getFullCourse));
+export const POST = withAuth(getFullCourse);
 
 // Удаление курса (только для администратора)
 async function deleteCourse(req: NextRequest, { params }: Params) {

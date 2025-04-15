@@ -263,7 +263,6 @@ export default function CoursesPage() {
                 thumbnail={course.thumbnail}
                 isFavorite={favorites.includes(course._id)}
                 onToggleFavorite={handleToggleFavorite}
-                isLocked={!activatedCourses.includes(course._id)}
               />
             ))}
           </div>

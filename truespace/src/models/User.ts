@@ -6,7 +6,6 @@ export interface IUser extends Document {
   password: string;
   name: string;
   favorites: mongoose.Types.ObjectId[];
-  promoCode: string;
   activatedCourses: mongoose.Types.ObjectId[];
   createdAt: Date;
   updatedAt: Date;
@@ -20,7 +19,6 @@ const UserSchema: Schema = new Schema(
     password: { type: String, required: true },
     name: { type: String, required: true },
     favorites: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
-    promoCode: { type: String },
     activatedCourses: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
   },
   { timestamps: true }

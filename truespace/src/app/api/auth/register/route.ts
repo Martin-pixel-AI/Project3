@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import dbConnect from '../../../../lib/db';
 import User from '../../../../models/User';
+import Course from '../../../../models/Course';
 import { generateToken } from '../../../../lib/auth';
 
 export async function POST(req: NextRequest) {
@@ -21,13 +22,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'User already exists with this email' }, { status: 409 });
     }
     
-    // Create new user
+    // Get all course IDs to automatically add to the user
+    const allCourses = await Course.find({}, '_id');
+    const allCourseIds = allCourses.map(course => course._id);
+    
+    console.log(`Auto-activating ${allCourseIds.length} courses for new user`);
+    
+    // Create new user with all courses activated
     const user = new User({
       email,
       password, // Will be hashed by pre-save hook
       name,
       favorites: [],
-      activatedCourses: []
+      activatedCourses: allCourseIds // Automatically activate all courses
     });
     
     await user.save();

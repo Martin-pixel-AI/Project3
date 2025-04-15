@@ -13,7 +13,6 @@ interface CourseCardProps {
   thumbnail?: string;
   isFavorite: boolean;
   onToggleFavorite: (id: string) => void;
-  isLocked: boolean;
 }
 
 const CourseCard: React.FC<CourseCardProps> = ({
@@ -24,8 +23,7 @@ const CourseCard: React.FC<CourseCardProps> = ({
   tags,
   thumbnail,
   isFavorite,
-  onToggleFavorite,
-  isLocked
+  onToggleFavorite
 }) => {
   const handleFavoriteClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -52,15 +50,6 @@ const CourseCard: React.FC<CourseCardProps> = ({
         ) : (
           <div className="w-full h-full flex items-center justify-center text-text-secondary">
             <span>No thumbnail</span>
-          </div>
-        )}
-        
-        {/* Lock indicator */}
-        {isLocked && (
-          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-            <span className="bg-background-light px-3 py-1 rounded-full text-sm">
-              Requires Promo Code
-            </span>
           </div>
         )}
         
