@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import dbConnect from '../../../../../lib/db';
 import Course from '../../../../../models/Course';
 import Video from '../../../../../models/Video';
-import PromoCode from '../../../../../models/PromoCode';
 import { withAuth } from '../../../../../lib/auth';
 import mongoose from 'mongoose';
 
@@ -32,12 +31,8 @@ async function getCourse(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: 'Курс не найден' }, { status: 404 });
     }
     
-    // Получаем связанные промокоды
-    const promoCodes = await PromoCode.find({ courseIds: id });
-    
     return NextResponse.json({ 
-      course,
-      promoCodes
+      course
     });
     
   } catch (error: any) {

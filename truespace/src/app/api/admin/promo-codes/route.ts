@@ -1,51 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
-import dbConnect from '../../../../lib/db';
-import PromoCode from '../../../../models/PromoCode';
-import Course from '../../../../models/Course';
 import { withAuth } from '../../../../lib/auth';
 
-// GET - Retrieve all promo codes with stats
+// GET - Retrieve promo code information (now deprecated)
 async function getPromoCodes(req: NextRequest) {
   try {
-    await dbConnect();
-    
     // Check admin permissions
     const user = (req as any).user;
     if (user.type !== 'admin') {
       return NextResponse.json({ error: 'Only admins can access this data' }, { status: 403 });
     }
     
-    // Fetch all promo codes with populated course data
-    const promoCodes = await PromoCode.find({})
-      .populate({
-        path: 'courseIds',
-        select: 'title thumbnail',
-        model: Course
-      })
-      .sort({ createdAt: -1 });
-    
-    // Calculate statistics
-    const totalPromoCodes = promoCodes.length;
-    const activePromoCodes = promoCodes.filter(code => code.isActive).length;
-    const totalUses = promoCodes.reduce((sum, code) => sum + code.uses, 0);
-    const expiredPromoCodes = promoCodes.filter(code => new Date(code.expiresAt) < new Date()).length;
-    const maxedOutPromoCodes = promoCodes.filter(code => code.maxUses > 0 && code.uses >= code.maxUses).length;
-    
+    // Return information about promo codes being removed
     return NextResponse.json({
-      promoCodes,
+      message: 'Promo code functionality has been removed from the platform',
+      info: 'All courses are now automatically available to users after registration',
+      promoCodes: [],
       stats: {
-        totalPromoCodes,
-        activePromoCodes,
-        totalUses,
-        expiredPromoCodes,
-        maxedOutPromoCodes
+        totalPromoCodes: 0,
+        activePromoCodes: 0,
+        totalUses: 0,
+        expiredPromoCodes: 0,
+        maxedOutPromoCodes: 0
       }
     });
     
   } catch (error: any) {
-    console.error('Error fetching promo codes:', error);
+    console.error('Error in promo codes endpoint:', error);
     return NextResponse.json({ 
-      error: error.message || 'Failed to fetch promo codes' 
+      error: error.message || 'Failed to process request' 
     }, { status: 500 });
   }
 }

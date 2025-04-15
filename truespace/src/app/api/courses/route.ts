@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import dbConnect from '../../../lib/db';
 import Course from '../../../models/Course';
 import Video from '../../../models/Video';
-import PromoCode from '../../../models/PromoCode';
 import { withAuth } from '../../../lib/auth';
 import mongoose from 'mongoose';
 
@@ -78,10 +77,7 @@ async function createCourse(req: NextRequest) {
       category, 
       tags, 
       thumbnail, 
-      videos, 
-      generatePromo = false, 
-      promoMaxUses = 10,
-      customPromoCode
+      videos
     } = body;
     
     // Проверка наличия обязательных полей
@@ -138,36 +134,6 @@ async function createCourse(req: NextRequest) {
         );
       }
       
-      // Создаем промокод, если запрошено
-      let promoCode = null;
-      if (generatePromo) {
-        // Генерируем случайный код или используем указанный
-        const generateRandomCode = () => {
-          const characters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-          let result = '';
-          for (let i = 0; i < 8; i++) {
-            result += characters.charAt(Math.floor(Math.random() * characters.length));
-          }
-          return result;
-        };
-        
-        const code = customPromoCode || generateRandomCode();
-        
-        // Устанавливаем срок действия промокода (30 дней)
-        const expiresAt = new Date();
-        expiresAt.setDate(expiresAt.getDate() + 30);
-        
-        // Создаем промокод
-        promoCode = await PromoCode.create([{
-          code,
-          courseIds: [courseId], // Привязываем только к текущему курсу
-          expiresAt,
-          maxUses: promoMaxUses,
-          uses: 0,
-          isActive: true
-        }], { session });
-      }
-      
       // Коммит транзакции
       await session.commitTransaction();
       
@@ -176,8 +142,7 @@ async function createCourse(req: NextRequest) {
       
       return NextResponse.json({ 
         message: 'Курс успешно создан',
-        course: populatedCourse,
-        promoCode: promoCode ? promoCode[0] : null
+        course: populatedCourse
       }, { status: 201 });
     } catch (error) {
       // В случае ошибки отменяем транзакцию
