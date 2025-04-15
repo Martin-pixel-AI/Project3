@@ -166,11 +166,14 @@ export default function AdminPage() {
   // Функция для удаления курса
   const deleteCourse = async (courseId: string) => {
     try {
+      setError(null);
       const token = localStorage.getItem('token');
       
       if (!token) {
         throw new Error('Вы не авторизованы');
       }
+      
+      console.log('Attempting to delete course:', courseId);
       
       const response = await fetch(`/api/courses/${courseId}`, {
         method: 'DELETE',
@@ -179,18 +182,47 @@ export default function AdminPage() {
         }
       });
       
-      const data = await response.json();
-      
       if (!response.ok) {
-        throw new Error(data.error || 'Не удалось удалить курс');
+        // Пытаемся прочитать ответ даже если статус не 200
+        try {
+          const errorData = await response.text();
+          let parsedError;
+          try {
+            parsedError = JSON.parse(errorData);
+            throw new Error(parsedError.error || `Ошибка удаления курса: ${response.status}`);
+          } catch (jsonError) {
+            // Если не удается распарсить JSON, возвращаем статус ошибки
+            throw new Error(`Ошибка удаления курса: ${response.status} ${response.statusText}`);
+          }
+        } catch (responseError) {
+          throw new Error(`Ошибка удаления курса: ${response.status} ${response.statusText}`);
+        }
       }
       
-      setSuccess('Курс успешно удален!');
+      // Пытаемся получить ответ от сервера
+      let data;
+      try {
+        const responseText = await response.text();
+        // Проверяем, что текст ответа не пустой
+        if (responseText.trim()) {
+          data = JSON.parse(responseText);
+        } else {
+          console.log('Empty response received, but status was OK. Assuming success.');
+          data = { message: 'Курс успешно удален' };
+        }
+      } catch (parseError) {
+        console.error('Error parsing response:', parseError);
+        // Если статус OK но формат ответа некорректный, считаем операцию успешной
+        data = { message: 'Курс успешно удален (формат ответа некорректный)' };
+      }
+      
+      setSuccess(data.message || 'Курс успешно удален!');
       
       // Обновляем статистику после удаления
       loadStats();
       
     } catch (err) {
+      console.error('Error deleting course:', err);
       setError(err instanceof Error ? err.message : 'Произошла ошибка при удалении курса');
     }
   };
