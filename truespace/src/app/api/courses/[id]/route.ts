@@ -153,6 +153,55 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
             accessMethod: 'direct_query'
           });
         }
+        
+        // EMERGENCY FIX: Check if user has activated promo codes
+        console.log('Checking for activated promo codes as emergency fallback...');
+        const userWithPromoCodes = await db.collection('users').findOne({
+          _id: new mongoose.Types.ObjectId(userId)
+        });
+        
+        if (userWithPromoCodes && userWithPromoCodes.activatedPromoCodes && userWithPromoCodes.activatedPromoCodes.length > 0) {
+          console.log('User has activated promo codes:', userWithPromoCodes.activatedPromoCodes);
+          
+          // Check if there's a promo code that grants access to this course
+          const promoCodesForCourse = await db.collection('promocodes').find({
+            code: { $in: userWithPromoCodes.activatedPromoCodes },
+            courseIds: new mongoose.Types.ObjectId(cleanCourseId)
+          }).toArray();
+          
+          if (promoCodesForCourse && promoCodesForCourse.length > 0) {
+            console.log('Found matching promo codes for this course:', 
+              promoCodesForCourse.map(p => p.code)
+            );
+            
+            // User has a valid promo code for this course, grant emergency access
+            console.log('EMERGENCY ACCESS GRANTED for course:', id);
+            
+            // Add the course to the user's activatedCourses as a fix
+            try {
+              await db.collection('users').updateOne(
+                { _id: new mongoose.Types.ObjectId(userId) },
+                { $addToSet: { activatedCourses: new mongoose.Types.ObjectId(cleanCourseId) } }
+              );
+              console.log('Updated user activatedCourses with missing course ID');
+            } catch (updateError) {
+              console.error('Failed to update user with missing course:', updateError);
+              // Continue anyway to provide access this time
+            }
+            
+            // Return the course
+            const serializedCourse = course.toObject ? course.toObject() : course;
+            return NextResponse.json({ 
+              course: serializedCourse,
+              accessMethod: 'emergency_promo_fix',
+              message: 'Emergency access granted based on promo code'
+            });
+          } else {
+            console.log('No matching promo codes found for this course');
+          }
+        } else {
+          console.log('User has no activated promo codes for emergency access');
+        }
       }
       
       console.log('Access denied for course:', id);

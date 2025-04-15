@@ -119,11 +119,30 @@ async function handler(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid course ID format' }, { status: 400 });
     }
     
-    // Активируем промокод для пользователя
+    // Activate promo code for user
     console.log(`⏳ Updating user ${userIdFromToken} with new activated promo code ${code} and course ${courseId}`);
     const activatedPromoCodes = user.activatedPromoCodes || [];
     
     try {
+      // Convert courseId to ObjectId
+      const courseObjectId = new mongoose.Types.ObjectId(courseId);
+      
+      // Log the data that we'll be updating
+      console.log('Update data:', {
+        userId: userIdFromToken,
+        newPromoCode: code,
+        courseId: courseId,
+        courseObjectId: courseObjectId.toString(),
+        existingPromoCodes: activatedPromoCodes,
+      });
+      
+      // Perform update directly using MongoDB driver for more reliability
+      const db = mongoose.connection.db;
+      if (!db) {
+        throw new Error('Database connection not established');
+      }
+      
+      // First approach: Use Mongoose model
       const updateResult = await User.updateOne(
         { _id: userIdFromToken },
         { 
@@ -136,11 +155,30 @@ async function handler(req: NextRequest) {
         }
       );
       
-      console.log(`📊 User update result: ${JSON.stringify(updateResult)}`);
+      console.log(`📊 Mongoose update result: ${JSON.stringify(updateResult)}`);
 
       if (updateResult.modifiedCount === 0) {
-        console.error(`❌ Failed to update user record for ${userIdFromToken}`);
-        return NextResponse.json({ error: 'Failed to update user record' }, { status: 500 });
+        console.log('⚠️ Mongoose update didn\'t modify the document, trying direct MongoDB driver...');
+        
+        // Second approach: Use MongoDB driver directly as fallback
+        const directUpdateResult = await db.collection('users').updateOne(
+          { _id: new mongoose.Types.ObjectId(userIdFromToken.toString()) },
+          { 
+            $set: { 
+              activatedPromoCodes: [...activatedPromoCodes, code]
+            },
+            $addToSet: { 
+              activatedCourses: courseObjectId
+            }
+          }
+        );
+        
+        console.log(`📊 Direct MongoDB update result: ${JSON.stringify(directUpdateResult)}`);
+        
+        if (directUpdateResult.modifiedCount === 0) {
+          console.error(`❌ Both update methods failed for user ${userIdFromToken}`);
+          return NextResponse.json({ error: 'Failed to update user record' }, { status: 500 });
+        }
       }
       
       // Increment uses counter for the promo code
@@ -165,7 +203,19 @@ async function handler(req: NextRequest) {
         );
         
         if (!courseWasAdded) {
-          console.error(`❌ Course ${courseId} was not added to user's activatedCourses despite successful update!`);
+          console.error(`❌ Course ${courseId} was not added to user's activatedCourses despite successful update! Using emergency fix...`);
+          
+          // Emergency third attempt using raw MongoDB commands
+          try {
+            const emergencyUpdateResult = await db.collection('users').updateOne(
+              { _id: new mongoose.Types.ObjectId(userIdFromToken.toString()) },
+              { $push: { activatedCourses: courseObjectId } } as any // Type assertion to bypass TypeScript limitation
+            );
+            
+            console.log(`📊 Emergency update result: ${JSON.stringify(emergencyUpdateResult)}`);
+          } catch (emergencyError) {
+            console.error('❌ Emergency update failed:', emergencyError);
+          }
         }
       }
       

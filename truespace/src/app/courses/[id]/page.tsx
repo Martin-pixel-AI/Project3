@@ -158,39 +158,49 @@ export default function CourseDetailPage() {
       }
       
       console.log('Attempting to activate promo code:', code);
+      console.log('For course ID:', courseId);
       
-      // Активируем промокод
-      const response = await fetch('/api/promo/activate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ code }),
-      });
-      
-      // Проверяем статус ответа перед парсингом JSON
-      if (!response.ok) {
-        // Пытаемся прочитать ответ даже если статус не 200
-        try {
-          const errorData = await response.json();
-          throw new Error(errorData.error || `Error ${response.status}: ${response.statusText}`);
-        } catch (jsonError) {
-          // Если не удается распарсить JSON, возвращаем статус ошибки
-          throw new Error(`Error ${response.status}: ${response.statusText}`);
-        }
+      // Activate promo code
+      let response;
+      try {
+        response = await fetch('/api/promo/activate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ code, courseId }),
+        });
+      } catch (fetchError) {
+        console.error('Network error during promo activation:', fetchError);
+        throw new Error('Network error: Could not connect to server');
       }
       
-      // Получаем данные ответа только после проверки статуса
+      console.log('Promo activation status:', response.status);
+      
+      // Get the response data even if status is not 200
       let activationData;
       try {
         activationData = await response.json();
+        console.log('Promo activation response:', activationData);
       } catch (jsonError) {
         console.error('Error parsing activation response:', jsonError);
         throw new Error('Invalid response format from server');
       }
       
-      console.log('Promo code activation response:', activationData);
+      // If we got a 400 error but it's just because the user already has this promo code,
+      // we'll treat it as a success and continue
+      if (!response.ok) {
+        if (response.status === 400 && 
+            activationData?.error?.includes('already activated')) {
+          console.log('Promo code already activated - continuing with course loading');
+          // Continue with course loading even though activation "failed"
+        } else {
+          // For other errors, throw the error message
+          const errorMessage = activationData?.error || `Error ${response.status}: ${response.statusText}`;
+          throw new Error(errorMessage);
+        }
+      }
       
       // Enhanced logging for troubleshooting
       console.log('User auth state:', { isAuthenticated: !!token, userId: localStorage.getItem('userId') });

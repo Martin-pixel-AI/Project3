@@ -26,6 +26,7 @@ const PromoCodeForm: React.FC<PromoCodeFormProps> = ({ onSubmit, courseId }) => 
     setLoading(true);
     
     try {
+      console.log(`Submitting promo code ${code} for course ${courseId || 'N/A'}`);
       await onSubmit(code);
       setCode('');
       setSuccess('Promo code activated successfully!');
