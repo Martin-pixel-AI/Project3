@@ -143,140 +143,45 @@ export const POST = withAuth(getFullCourse);
 
 // Удаление курса (только для администратора)
 async function deleteCourse(req: NextRequest, { params }: Params) {
-  console.log('Starting course deletion process for ID:', params.id);
+  // Simple implementation focusing only on deleting the course itself
   try {
-    // Connect to database
-    try {
-      await dbConnect();
-    } catch (dbError) {
-      console.error('Database connection error:', dbError);
-      return NextResponse.json({ 
-        error: 'Ошибка подключения к базе данных',
-        details: (dbError as Error).message
-      }, { status: 500 });
-    }
+    await dbConnect();
     
     const { id } = params;
     const userData = (req as any).user;
     
-    // Log the deletion attempt
-    console.log('Course deletion requested by:', { userId: userData.id, userType: userData.type, courseId: id });
+    // Simple logging
+    console.log(`Deleting course ${id} requested by user ${userData.id}`);
     
     // Check if user is admin
     if (userData.type !== 'admin') {
-      console.log('Deletion rejected: user is not admin');
-      return NextResponse.json({ 
-        error: 'Только администраторы могут удалять курсы' 
-      }, { status: 403 });
+      return new NextResponse('Только администраторы могут удалять курсы', { status: 403 });
     }
     
-    // Find the course with videos for deletion
-    let course;
+    // Find course first to confirm it exists
+    const courseExists = await Course.findById(id);
+    if (!courseExists) {
+      return new NextResponse('Курс не найден', { status: 404 });
+    }
+    
+    // Delete the course - this is the primary operation we're testing
     try {
-      course = await Course.findById(id);
-      if (!course) {
-        console.log('Course not found for deletion:', id);
-        return NextResponse.json({ error: 'Курс не найден' }, { status: 404 });
-      }
-    } catch (findError) {
-      console.error('Error finding course for deletion:', findError);
-      return NextResponse.json({ 
-        error: 'Ошибка при поиске курса',
-        details: (findError as Error).message
-      }, { status: 500 });
+      const result = await Course.deleteOne({ _id: id });
+      console.log('Course deletion result:', result);
+    } catch (deleteErr: any) {
+      console.error('Error in Course.deleteOne:', deleteErr);
+      return new NextResponse(`Ошибка при удалении курса: ${deleteErr.message}`, { status: 500 });
     }
     
-    let videoIds = [];
-    try {
-      // We'll do a separate query to find videos instead of using populate
-      const Video = mongoose.model('Video');
-      const videos = await Video.find({ courseId: id });
-      videoIds = videos.map(video => video._id);
-      console.log(`Found ${videoIds.length} videos to delete for course:`, id);
-    } catch (videoFindError) {
-      console.error('Error finding videos for deletion:', videoFindError);
-      // Continue with deletion even if we can't find videos
-    }
-    
-    // Step 1: Delete all course videos
-    if (videoIds.length > 0) {
-      try {
-        const VideoModel = mongoose.model('Video');
-        const deleteResult = await VideoModel.deleteMany({ 
-          _id: { $in: videoIds } 
-        });
-        console.log('Videos deletion result:', deleteResult);
-      } catch (videoDeletionError) {
-        console.error('Error deleting videos:', videoDeletionError);
-        // Continue with deletion even if video deletion fails
-      }
-    }
-    
-    // Step 2: Remove course from users' activated courses
-    try {
-      const updateResult = await User.updateMany(
-        { activatedCourses: id }, 
-        { $pull: { activatedCourses: id } }
-      );
-      console.log('Remove from activated courses result:', updateResult);
-    } catch (activatedCoursesError) {
-      console.error('Error removing course from activated courses:', activatedCoursesError);
-      // Continue with deletion even if this fails
-    }
-    
-    // Step 3: Remove course from users' favorites
-    try {
-      const favResult = await User.updateMany(
-        { favorites: id }, 
-        { $pull: { favorites: id } }
-      );
-      console.log('Remove from favorites result:', favResult);
-    } catch (favoritesError) {
-      console.error('Error removing course from favorites:', favoritesError);
-      // Continue with deletion even if this fails
-    }
-    
-    // Step 4: Delete the course itself
-    try {
-      const deleteResult = await Course.findByIdAndDelete(id);
-      if (!deleteResult) {
-        console.warn('Course not found during final deletion step');
-      }
-      console.log('Course deletion result:', deleteResult ? 'Success' : 'Not found');
-    } catch (courseDeletionError) {
-      console.error('Error deleting course:', courseDeletionError);
-      return NextResponse.json({ 
-        error: 'Не удалось удалить курс',
-        details: (courseDeletionError as Error).message
-      }, { status: 500 });
-    }
-    
-    // Prepare response
-    const response = { 
-      message: 'Курс успешно удален',
-      deletedCourseId: id,
-      title: course.title
-    };
-    
-    console.log('Successfully deleted course:', response);
-    
-    // Ensure we return a proper JSON response
-    try {
-      return new NextResponse(JSON.stringify(response), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    } catch (responseError) {
-      console.error('Error creating JSON response:', responseError);
-      // Fallback to simple text response if JSON fails
-      return new NextResponse('Курс успешно удален', { status: 200 });
-    }
+    // Return a simple text response
+    return new NextResponse('Курс успешно удален', { status: 200 });
   } catch (error: any) {
-    console.error('Unexpected error during course deletion:', error);
-    return NextResponse.json({ 
-      error: error.message || 'Не удалось удалить курс',
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    }, { status: 500 });
+    console.error('Error deleting course:', error);
+    // Return a very simple text response to avoid any serialization issues
+    return new NextResponse(
+      `Ошибка удаления курса: ${error.message}`, 
+      { status: 500 }
+    );
   }
 }
 

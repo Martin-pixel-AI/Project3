@@ -29,17 +29,42 @@ if (!global.mongoose) {
 
 async function dbConnect() {
   if (cached.conn) {
+    console.log('Using cached database connection');
     return cached.conn;
   }
 
   if (!cached.promise) {
-    cached.promise = mongoose.connect(MONGODB_URI).then((mongoose) => {
-      return mongoose;
-    });
+    const opts = {
+      bufferCommands: false,
+      serverSelectionTimeoutMS: 10000, // Timeout after 10s
+      maxPoolSize: 10, // Maintain up to 10 socket connections
+    };
+
+    console.log('Creating new database connection to:', MONGODB_URI);
+    
+    cached.promise = mongoose.connect(MONGODB_URI, opts)
+      .then((mongoose) => {
+        console.log('Database connection established successfully');
+        mongoose.connection.on('error', (err) => {
+          console.error('MongoDB connection error:', err);
+        });
+        return mongoose;
+      })
+      .catch((error) => {
+        console.error('Failed to connect to MongoDB:', error);
+        throw error;
+      });
+  } else {
+    console.log('Using existing database connection promise');
   }
 
-  cached.conn = await cached.promise;
-  return cached.conn;
+  try {
+    cached.conn = await cached.promise;
+    return cached.conn;
+  } catch (error) {
+    console.error('Error resolving database connection:', error);
+    throw error;
+  }
 }
 
 export default dbConnect; 

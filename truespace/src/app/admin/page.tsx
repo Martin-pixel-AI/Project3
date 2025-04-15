@@ -183,42 +183,14 @@ export default function AdminPage() {
       });
       
       if (!response.ok) {
-        // Пытаемся прочитать ответ даже если статус не 200
-        try {
-          const errorData = await response.text();
-          let parsedError;
-          try {
-            parsedError = JSON.parse(errorData);
-            const errorMessage = parsedError.error || `Ошибка удаления курса: ${response.status}`;
-            const errorDetails = parsedError.details ? `\nДетали: ${parsedError.details}` : '';
-            throw new Error(`${errorMessage}${errorDetails}`);
-          } catch (jsonError) {
-            // Если не удается распарсить JSON, возвращаем статус ошибки
-            throw new Error(`Ошибка удаления курса: ${response.status} ${response.statusText}`);
-          }
-        } catch (responseError) {
-          throw new Error(`Ошибка удаления курса: ${response.status} ${response.statusText}`);
-        }
+        // Get the error as text
+        const errorText = await response.text();
+        throw new Error(errorText || `Ошибка удаления курса: ${response.status} ${response.statusText}`);
       }
       
-      // Пытаемся получить ответ от сервера
-      let data;
-      try {
-        const responseText = await response.text();
-        // Проверяем, что текст ответа не пустой
-        if (responseText.trim()) {
-          data = JSON.parse(responseText);
-        } else {
-          console.log('Empty response received, but status was OK. Assuming success.');
-          data = { message: 'Курс успешно удален' };
-        }
-      } catch (parseError) {
-        console.error('Error parsing response:', parseError);
-        // Если статус OK но формат ответа некорректный, считаем операцию успешной
-        data = { message: 'Курс успешно удален (формат ответа некорректный)' };
-      }
-      
-      setSuccess(data.message || 'Курс успешно удален!');
+      // Read response as text
+      const successText = await response.text();
+      setSuccess(successText || 'Курс успешно удален!');
       
       // Обновляем статистику после удаления
       loadStats();
