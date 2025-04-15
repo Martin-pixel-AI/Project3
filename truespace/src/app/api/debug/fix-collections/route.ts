@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import dbConnect from '../../../../lib/db';
 import mongoose from 'mongoose';
 import { withAuth } from '../../../../lib/auth';
+import { getCollectionName, getCollection } from '@/lib/db-utils';
 
 // Define interfaces for the report structure
 interface CollectionInfo {
@@ -48,13 +49,13 @@ async function handler(req: NextRequest) {
     
     console.log('Found collections:', collectionNames);
     
-    // Check if we have both PromoCode and promocodes collections
-    const hasPromoCodeCollection = collectionNames.includes('promocodes');
-    const hasPromoCodes = collectionNames.includes('PromoCodes');
+    // Check if we have promo code collections using our helper
+    const promoCodesCollectionName = await getCollectionName(db, 'promocodes');
+    const promoCodesUpperCollectionName = await getCollectionName(db, 'PromoCodes');
     
     console.log('Collection check:', {
-      hasPromoCodeCollection,
-      hasPromoCodes,
+      promoCodesCollectionName,
+      promoCodesUpperCollectionName,
     });
     
     // Initialize properly typed report
@@ -68,50 +69,56 @@ async function handler(req: NextRequest) {
     };
     
     // Check the documents in each collection
-    if (hasPromoCodeCollection) {
-      const promoCodesCount = await db.collection('promocodes').countDocuments();
-      console.log('promocodes collection has', promoCodesCount, 'documents');
-      report.promo_collections_found.push({ name: 'promocodes', count: promoCodesCount });
+    if (promoCodesCollectionName) {
+      const promoCodesCollection = db.collection(promoCodesCollectionName);
+      const promoCodesCount = await promoCodesCollection.countDocuments();
+      console.log(`${promoCodesCollectionName} collection has ${promoCodesCount} documents`);
+      report.promo_collections_found.push({ name: promoCodesCollectionName, count: promoCodesCount });
     }
     
-    if (hasPromoCodes) {
-      const promoCodesCount = await db.collection('PromoCodes').countDocuments();
-      console.log('PromoCodes collection has', promoCodesCount, 'documents');
-      report.promo_collections_found.push({ name: 'PromoCodes', count: promoCodesCount });
+    if (promoCodesUpperCollectionName && promoCodesUpperCollectionName !== promoCodesCollectionName) {
+      const promoCodesUpperCollection = db.collection(promoCodesUpperCollectionName);
+      const promoCodesUpperCount = await promoCodesUpperCollection.countDocuments();
+      console.log(`${promoCodesUpperCollectionName} collection has ${promoCodesUpperCount} documents`);
+      report.promo_collections_found.push({ name: promoCodesUpperCollectionName, count: promoCodesUpperCount });
     }
     
-    // If we only have 'PromoCodes' but need 'promocodes', copy the documents
-    if (hasPromoCodes && !hasPromoCodeCollection) {
-      console.log('Need to create promocodes collection from PromoCodes');
+    // If we have one format but not the other needed format, copy the documents
+    const targetPromoName = 'promocodes'; // The name we want to standardize on
+    
+    if (promoCodesUpperCollectionName && promoCodesUpperCollectionName !== targetPromoName && !promoCodesCollectionName) {
+      console.log(`Need to create ${targetPromoName} collection from ${promoCodesUpperCollectionName}`);
       
-      const promoCodes = await db.collection('PromoCodes').find({}).toArray();
+      const promoCodesUpperCollection = db.collection(promoCodesUpperCollectionName);
+      const promoCodes = await promoCodesUpperCollection.find({}).toArray();
       
       if (promoCodes.length > 0) {
-        await db.createCollection('promocodes');
-        const result = await db.collection('promocodes').insertMany(promoCodes);
-        console.log('Copied', result.insertedCount, 'promo codes to promocodes collection');
-        report.fixes_applied.push(`Created promocodes collection and copied ${result.insertedCount} documents from PromoCodes`);
+        await db.createCollection(targetPromoName);
+        const result = await db.collection(targetPromoName).insertMany(promoCodes);
+        console.log(`Copied ${result.insertedCount} promo codes to ${targetPromoName} collection`);
+        report.fixes_applied.push(`Created ${targetPromoName} collection and copied ${result.insertedCount} documents from ${promoCodesUpperCollectionName}`);
       } else {
-        report.issues_found.push('PromoCodes collection exists but is empty');
+        report.issues_found.push(`${promoCodesUpperCollectionName} collection exists but is empty`);
       }
     }
     
     // If we have neither, report the issue
-    if (!hasPromoCodes && !hasPromoCodeCollection) {
+    if (!promoCodesCollectionName && !promoCodesUpperCollectionName) {
       console.log('No promo code collections found');
       report.issues_found.push('No promo code collections found. You may need to create promo codes first.');
     }
     
     // Check for user collection issues
-    const hasUsersCollection = collectionNames.includes('users');
+    const usersCollectionName = await getCollectionName(db, 'users');
     
-    if (hasUsersCollection) {
+    if (usersCollectionName) {
       // Find users with activatedPromoCodes field
-      const usersWithPromoCodes = await db.collection('users').find({
+      const usersCollection = db.collection(usersCollectionName);
+      const usersWithPromoCodes = await usersCollection.find({
         activatedPromoCodes: { $exists: true, $ne: [] }
       }).toArray();
       
-      console.log('Found', usersWithPromoCodes.length, 'users with activated promo codes');
+      console.log(`Found ${usersWithPromoCodes.length} users with activated promo codes`);
       
       if (usersWithPromoCodes.length > 0) {
         report.diagnostics.users_with_promo_codes = usersWithPromoCodes.length;
