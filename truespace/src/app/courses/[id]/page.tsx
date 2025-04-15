@@ -9,6 +9,8 @@ import PromoCodeForm from '../../../components/courses/PromoCodeForm';
 import Loader from '../../../components/ui/Loader';
 import { HeartIcon } from '@heroicons/react/24/outline';
 import { HeartIcon as HeartIconSolid } from '@heroicons/react/24/solid';
+import EmergencyFix from './EmergencyFix';
+import { addDirectAccessHeader, hasDirectAccessToken } from '@/lib/directAccess';
 
 interface Video {
   _id: string;
@@ -47,6 +49,7 @@ export default function CourseDetailPage() {
     const fetchCourse = async () => {
       try {
         setLoading(true);
+        setError(null);
         
         // First, fetch basic course info (public)
         const response = await fetch(`/api/courses/${courseId}`);
@@ -65,12 +68,25 @@ export default function CourseDetailPage() {
           return;
         }
         
+        // Check for direct access token
+        const hasDirectAccess = hasDirectAccessToken(courseId);
+        
+        // Prepare headers for full course request
+        let headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        };
+        
+        // Add direct access token if available
+        if (hasDirectAccess) {
+          headers = addDirectAccessHeader(courseId, headers);
+          console.log('Using direct access token for course request');
+        }
+        
         // Try to fetch course with videos (requires authorization)
         const fullCourseResponse = await fetch(`/api/courses/${courseId}`, {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers
         });
         
         if (fullCourseResponse.ok) {
@@ -84,6 +100,11 @@ export default function CourseDetailPage() {
           // Set first video as selected if available
           if (fullCourseData.course.videos?.length) {
             setSelectedVideo(fullCourseData.course.videos[0]);
+          }
+          
+          // Log if this was a direct access success
+          if (fullCourseData.accessMethod === 'direct_access_token') {
+            console.log('Successfully accessed course via direct access token');
           }
         } else {
           // If not authorized, course remains locked
@@ -197,140 +218,67 @@ export default function CourseDetailPage() {
         throw new Error('Invalid response format from server');
       }
       
-      // If we got a 400 error but it's just because the user already has this promo code,
-      // we'll treat it as a success and continue
+      // Check for errors in the response
       if (!response.ok) {
-        if (response.status === 400 && 
-            activationData?.error?.includes('already activated')) {
-          console.log('Promo code already activated - continuing with course loading');
-          // Continue with course loading even though activation "failed"
-        } else {
-          // For other errors, throw the error message
-          const errorMessage = activationData?.error || `Error ${response.status}: ${response.statusText}`;
-          console.error('Promo activation error:', errorMessage);
-          throw new Error(errorMessage);
-        }
+        const errorMsg = activationData.error || 'Failed to activate promo code';
+        console.error('Activation error:', errorMsg);
+        throw new Error(errorMsg);
       }
       
-      // Enhanced logging for troubleshooting
-      console.log('User auth state:', { isAuthenticated: !!token, userId: localStorage.getItem('userId') });
-      console.log('Course access check before timeout:', { 
-        courseId, 
-        isLocked, 
-        showVideoPlayer,
-        hasVideos: course?.videos && course.videos.length > 0 
-      });
+      // Success! Reload the course data to show unlocked content
+      console.log('Promo code activated successfully!');
       
-      // After successful activation, we need to wait for database changes to propagate
-      // The delay was increased from 1 to 3 seconds, but we'll increase it further to 5 seconds
-      // to ensure database changes are fully applied
-      console.log(`Waiting 5 seconds for database changes to propagate...`);
+      // Adding a delay to ensure the database change is reflected
+      // This helps avoid race conditions where the course data might not 
+      // be immediately updated in the database
       setTimeout(async () => {
         try {
-          console.log('Fetching updated course data after promo activation');
-          console.log('Auth token for course fetch:', token ? `${token.substring(0, 15)}...` : 'No token');
+          // Re-fetch the course data
+          const token = localStorage.getItem('token');
+          if (!token) return;
           
-          // Making multiple attempts to fetch the course data in case of database replication lag
-          let fetchAttempts = 0;
-          const maxAttempts = 3;
-          let fullCourseData = null;
-          
-          while (fetchAttempts < maxAttempts && !fullCourseData?.course?.videos?.length) {
-            fetchAttempts++;
-            console.log(`Attempt ${fetchAttempts} to fetch course data...`);
-            
-            // Делаем повторный запрос полных данных курса
-            const fullCourseResponse = await fetch(`/api/courses/${courseId}`, {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${token}`,
-              },
-              // Adding cache control to prevent cached responses
-              cache: 'no-store',
-            });
-            
-            if (!fullCourseResponse.ok) {
-              console.error(`Failed fetch attempt ${fetchAttempts}: ${fullCourseResponse.status}`);
-              if (fetchAttempts === maxAttempts) {
-                throw new Error(`Failed to fetch course data: ${fullCourseResponse.status}`);
-              }
-              // Wait 2 seconds between attempts
-              await new Promise(resolve => setTimeout(resolve, 2000));
-              continue;
-            }
-            
-            try {
-              fullCourseData = await fullCourseResponse.json();
-              console.log(`Fetch attempt ${fetchAttempts} response:`, fullCourseData);
-            } catch (jsonError) {
-              console.error(`Error parsing JSON in attempt ${fetchAttempts}:`, jsonError);
-              if (fetchAttempts === maxAttempts) {
-                throw new Error('Invalid response format from server');
-              }
-              // Wait 2 seconds between attempts
-              await new Promise(resolve => setTimeout(resolve, 2000));
-              continue;
-            }
-            
-            // If we have videos, we can stop trying
-            if (fullCourseData?.course?.videos?.length) {
-              console.log(`Successfully received course data with videos on attempt ${fetchAttempts}`);
-              break;
-            } else {
-              console.log(`No videos in response, trying again in 2 seconds...`);
-              // Wait 2 seconds between attempts
-              await new Promise(resolve => setTimeout(resolve, 2000));
-            }
-          }
-          
-          console.log('Final course data after promo activation:', {
-            courseId: fullCourseData?.course?._id,
-            title: fullCourseData?.course?.title,
-            hasAccess: fullCourseData?.hasAccess,
-            videoCount: fullCourseData?.course?.videos?.length || 0,
-            isUser: fullCourseData?.isUser,
-            isAdmin: fullCourseData?.isAdmin
+          const fullCourseResponse = await fetch(`/api/courses/${courseId}`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
           });
           
-          if (fullCourseData && fullCourseData.course && fullCourseData.course.videos?.length > 0) {
-            console.log('Updating UI with new course data that includes videos');
+          if (fullCourseResponse.ok) {
+            const fullCourseData = await fullCourseResponse.json();
             setCourse(fullCourseData.course);
             
-            // Если получили видео, значит курс доступен
+            // If we get videos, the course is unlocked
             setIsLocked(false);
-            setShowVideoPlayer(true);
+            setShowVideoPlayer(fullCourseData.course.videos?.length > 0);
             
-            // Устанавливаем первое видео как выбранное
-            setSelectedVideo(fullCourseData.course.videos[0]);
+            // Set first video as selected if available
+            if (fullCourseData.course.videos?.length) {
+              setSelectedVideo(fullCourseData.course.videos[0]);
+            }
           } else {
-            console.error('Failed to get course with videos:', fullCourseData?.error || 'No videos returned');
-            alert('Промокод был активирован, но курс всё ещё недоступен. Пожалуйста, обновите страницу или обратитесь в поддержку.');
-            
-            // Force page reload after a short delay
-            setTimeout(() => {
-              window.location.reload();
-            }, 1500);
+            console.error('Failed to update course data after promo activation');
+            // Try to use debug endpoint to fix access
+            await fetch('/api/debug/course-access/direct-fix', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ courseId }),
+            });
+            // Reload the page entirely as a fallback
+            window.location.reload();
           }
-        } catch (error) {
-          console.error('Error fetching course after promo activation:', error);
-          alert('Промокод был активирован, но произошла ошибка при загрузке видео. Страница будет перезагружена.');
+        } catch (fetchError) {
+          console.error('Error fetching updated course data:', fetchError);
+          // Reload the entire page as a fallback
           window.location.reload();
         }
-      }, 5000); // Increasing delay from 3 seconds to 5 seconds for more reliable database updates
+      }, 1500); // 1.5 second delay
       
     } catch (err) {
-      console.error('Error activating promo code:', err);
-      let errorMessage = 'Не удалось активировать промокод';
-      
-      if (err instanceof Error) {
-        errorMessage = err.message;
-      } else if (typeof err === 'string') {
-        errorMessage = err;
-      } else if (err && typeof err === 'object' && 'message' in err) {
-        errorMessage = String((err as any).message);
-      }
-      
-      alert(errorMessage);
+      console.error('Promo code activation error:', err);
+      throw err; // Re-throw to be handled by the form component
     }
   };
   
@@ -414,18 +362,26 @@ export default function CourseDetailPage() {
                 
                 <PromoCodeForm onSubmit={handlePromoCodeSubmit} courseId={courseId} />
                 
-                {/* Emergency debug access check */}
+                {/* Emergency fix component */}
+                {localStorage.getItem('token') && (
+                  <EmergencyFix 
+                    courseId={courseId} 
+                    token={localStorage.getItem('token') || ''} 
+                  />
+                )}
+                
+                {/* Link to check access */}
                 <div className="mt-4 text-center">
                   <button
                     onClick={async () => {
                       try {
                         const token = localStorage.getItem('token');
                         if (!token) {
-                          alert('You need to be logged in to perform a debug check');
+                          alert('You need to log in first');
+                          router.push('/auth');
                           return;
                         }
                         
-                        console.log('Performing emergency access check for course:', courseId);
                         const response = await fetch('/api/debug/access', {
                           method: 'POST',
                           headers: {
@@ -436,7 +392,7 @@ export default function CourseDetailPage() {
                         });
                         
                         const data = await response.json();
-                        console.log('Debug access check result:', data);
+                        console.log('Access debug data:', data);
                         
                         if (data.diagnostics?.shouldHaveAccess) {
                           // User should have access, attempt to fix it

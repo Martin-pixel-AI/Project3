@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import dbConnect from '../../../../lib/db';
 import mongoose from 'mongoose';
 import { withAuth } from '../../../../lib/auth';
+import { getCollection, toObjectId, getMongoDb } from '@/lib/db-utils';
 
 /**
  * This is an emergency route to directly force-activate course access
@@ -33,13 +34,18 @@ async function handler(req: NextRequest) {
     console.log(`Attempting direct access to course ${courseId} for user ${userId}`);
     
     // Direct database access
-    const db = mongoose.connection.db;
+    const db = getMongoDb();
     if (!db) {
       return NextResponse.json({ error: 'Database connection not established' }, { status: 500 });
     }
     
+    // Get collections with proper casing
+    const usersCollection = await getCollection(db, 'users');
+    const coursesCollection = await getCollection(db, 'courses');
+    const directAccessCollection = await getCollection(db, 'directAccess');
+    
     // Get current user info for reference
-    const userBefore = await db.collection('users').findOne({ _id: new mongoose.Types.ObjectId(userId) });
+    const userBefore = await usersCollection.findOne({ _id: toObjectId(userId) });
     if (!userBefore) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
@@ -47,13 +53,13 @@ async function handler(req: NextRequest) {
     // Create course ObjectId (with validation)
     let courseObjectId;
     try {
-      courseObjectId = new mongoose.Types.ObjectId(courseId);
+      courseObjectId = toObjectId(courseId);
     } catch (error) {
       return NextResponse.json({ error: 'Invalid course ID format' }, { status: 400 });
     }
     
     // Check if the course exists
-    const course = await db.collection('courses').findOne({ _id: courseObjectId });
+    const course = await coursesCollection.findOne({ _id: courseObjectId });
     if (!course) {
       return NextResponse.json({ error: 'Course not found' }, { status: 404 });
     }
@@ -63,14 +69,14 @@ async function handler(req: NextRequest) {
     // Force-add the course to user's activated courses in THREE different ways to ensure it works
     
     // 1. First, update using MongoDB driver
-    const updateResult1 = await db.collection('users').updateOne(
-      { _id: new mongoose.Types.ObjectId(userId) },
+    const updateResult1 = await usersCollection.updateOne(
+      { _id: toObjectId(userId) },
       { $addToSet: { activatedCourses: courseObjectId } }
     );
     
     // 2. Then, update again just to be sure, using a completely different approach
-    const updateResult2 = await db.collection('users').updateOne(
-      { _id: new mongoose.Types.ObjectId(userId) },
+    const updateResult2 = await usersCollection.updateOne(
+      { _id: toObjectId(userId) },
       { $set: { [`coursesDirectAccess.${courseId}`]: true } }
     );
     
@@ -79,7 +85,7 @@ async function handler(req: NextRequest) {
       update: 'users',
       updates: [
         {
-          q: { _id: new mongoose.Types.ObjectId(userId) },
+          q: { _id: toObjectId(userId) },
           u: { $push: { activatedCourses: courseObjectId } },
           upsert: false
         }
@@ -87,14 +93,14 @@ async function handler(req: NextRequest) {
     });
     
     // Get the updated user data
-    const userAfter = await db.collection('users').findOne({ _id: new mongoose.Types.ObjectId(userId) });
+    const userAfter = await usersCollection.findOne({ _id: toObjectId(userId) });
     
     // Create a special direct access token
     const directAccessToken = Buffer.from(`${userId}:${courseId}:${Date.now()}`).toString('base64');
     
     // Store this token in a special collection for reference
-    await db.collection('directAccess').insertOne({
-      userId: new mongoose.Types.ObjectId(userId),
+    await directAccessCollection.insertOne({
+      userId: toObjectId(userId),
       courseId: courseObjectId,
       token: directAccessToken,
       createdAt: new Date()

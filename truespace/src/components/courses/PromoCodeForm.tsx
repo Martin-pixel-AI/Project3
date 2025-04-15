@@ -34,6 +34,10 @@ const PromoCodeForm: React.FC<PromoCodeFormProps> = ({ onSubmit, courseId }) => 
     try {
       console.log(`Submitting promo code ${code} for course ${courseId || 'N/A'}`);
       
+      // Store the code in localStorage for debugging purposes
+      localStorage.setItem('lastPromoCode', code);
+      localStorage.setItem('lastPromoCodeCourse', courseId);
+      
       // Attempt activation
       await onSubmit(code);
       
@@ -41,8 +45,6 @@ const PromoCodeForm: React.FC<PromoCodeFormProps> = ({ onSubmit, courseId }) => 
       setCode('');
       setSuccess('Promo code activated successfully! Loading course content...');
       
-      // After success message, reload the page after a short delay if necessary
-      // setTimeout(() => window.location.reload(), 3000);
     } catch (err) {
       console.error('PromoCodeForm error:', err);
       
@@ -71,6 +73,9 @@ const PromoCodeForm: React.FC<PromoCodeFormProps> = ({ onSubmit, courseId }) => 
       }
       else if (errorMessage.includes('reached maximum uses')) {
         errorMessage = 'This promo code has reached its maximum number of uses. Please contact support for assistance.';
+      }
+      else if (errorMessage.includes('Network error')) {
+        errorMessage = 'Connection problem. Please check your internet connection and try again.';
       }
       
       setError(errorMessage);

@@ -4,6 +4,8 @@ import Course from '../../../../models/Course';
 import User, { IUser } from '../../../../models/User';
 import { withAuth } from '../../../../lib/auth';
 import mongoose from 'mongoose';
+import { getCollection, toObjectId } from '@/lib/db-utils';
+import { withDirectAccess } from '@/lib/directAccessMiddleware';
 
 interface Params {
   params: {
@@ -43,10 +45,15 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
     const userId = userData.id;
     const userType = userData.type;
     
+    // Check for direct access override
+    const directAccess = (req as any).directAccess;
+    const hasDirectAccessOverride = directAccess && directAccess.courseId === id;
+    
     console.log('getFullCourse request:', { 
       courseId: id, 
       userId, 
-      userType 
+      userType,
+      hasDirectAccessOverride: !!hasDirectAccessOverride
     });
     
     // Find course with populated videos
@@ -65,6 +72,17 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
       hasVideos: !!course.videos?.length,
       videosCount: course.videos?.length || 0
     });
+    
+    // If direct access is being used, grant access immediately
+    if (hasDirectAccessOverride) {
+      console.log('Direct access override granted for course:', id);
+      // Ensure we're returning a serializable object
+      const serializedCourse = course.toObject ? course.toObject() : course;
+      return NextResponse.json({ 
+        course: serializedCourse,
+        accessMethod: 'direct_access_token'
+      });
+    }
     
     // Администратор всегда имеет доступ к полной информации о курсе
     if (userType === 'admin') {
@@ -230,7 +248,7 @@ async function getFullCourse(req: NextRequest, { params }: Params) {
   }
 }
 
-export const POST = withAuth(getFullCourse); 
+export const POST = withDirectAccess(withAuth(getFullCourse));
 
 // Удаление курса (только для администратора)
 async function deleteCourse(req: NextRequest, { params }: Params) {
