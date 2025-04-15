@@ -143,46 +143,85 @@ export const POST = withAuth(getFullCourse);
 
 // Удаление курса (только для администратора)
 async function deleteCourse(req: NextRequest, { params }: Params) {
+  console.log('Standard delete endpoint called for course ID:', params.id);
+  
   try {
-    // Connect to database
+    // Connect to database 
     await dbConnect();
     
     const { id } = params;
     const userData = (req as any).user;
     
-    // Check if user is admin
+    // Check user is admin
     if (userData.type !== 'admin') {
       return new NextResponse('Только администраторы могут удалять курсы', { status: 403 });
     }
-
-    // Use direct MongoDB driver operations to bypass Mongoose model issues
+    
+    // Use direct MongoDB operations like our successful emergency delete approach
     const db = mongoose.connection.db;
     if (!db) {
       return new NextResponse('Database connection not established', { status: 500 });
     }
-
+    
+    // Step 1: Verify the course exists
+    let course;
     try {
-      // Step 1: Find the course to make sure it exists
-      const course = await db.collection('courses').findOne({ 
-        _id: new mongoose.Types.ObjectId(id) 
-      });
+      const courseObjectId = new mongoose.Types.ObjectId(id);
+      course = await db.collection('courses').findOne({ _id: courseObjectId });
       
       if (!course) {
         return new NextResponse('Курс не найден', { status: 404 });
       }
       
-      // Step 2: Delete the course directly
-      const result = await db.collection('courses').deleteOne({ 
-        _id: new mongoose.Types.ObjectId(id) 
+      console.log('Found course for deletion:', course.title);
+      
+      // Step 2: Try to find and delete related videos
+      try {
+        const videoCount = await db.collection('videos').deleteMany({ 
+          courseId: courseObjectId 
+        });
+        console.log(`Deleted ${videoCount.deletedCount} videos for course ${id}`);
+      } catch (videoError) {
+        console.error('Warning: Error deleting videos:', videoError);
+        // Continue even if video deletion fails
+      }
+      
+      // Step 3: Remove course from users' activated courses
+      try {
+        const userUpdateResult = await db.collection('users').updateMany(
+          { activatedCourses: courseObjectId } as any, 
+          { $pull: { activatedCourses: courseObjectId } } as any
+        );
+        console.log(`Removed course from ${userUpdateResult.modifiedCount} users' activated courses`);
+      } catch (userError) {
+        console.error('Warning: Error updating user activatedCourses:', userError);
+        // Continue even if user update fails
+      }
+      
+      // Step 4: Remove course from users' favorites
+      try {
+        const favUpdateResult = await db.collection('users').updateMany(
+          { favorites: courseObjectId } as any, 
+          { $pull: { favorites: courseObjectId } } as any
+        );
+        console.log(`Removed course from ${favUpdateResult.modifiedCount} users' favorites`);
+      } catch (favError) {
+        console.error('Warning: Error updating user favorites:', favError);
+        // Continue even if favorites update fails
+      }
+      
+      // Step 5: Delete the course itself
+      const deleteResult = await db.collection('courses').deleteOne({ 
+        _id: courseObjectId 
       });
       
-      console.log('Raw MongoDB deletion result:', result);
+      console.log('Course deletion result:', deleteResult);
       
-      if (result.deletedCount === 0) {
+      if (deleteResult.deletedCount === 0) {
         return new NextResponse('Не удалось удалить курс', { status: 500 });
       }
       
-      return new NextResponse('Курс успешно удален', { status: 200 });
+      return new NextResponse(`Курс "${course.title}" успешно удален`, { status: 200 });
     } catch (dbError: any) {
       console.error('Database operation error:', dbError);
       return new NextResponse(`Ошибка базы данных: ${dbError.message}`, { status: 500 });
