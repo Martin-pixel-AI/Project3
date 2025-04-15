@@ -413,6 +413,67 @@ export default function CourseDetailPage() {
                 </p>
                 
                 <PromoCodeForm onSubmit={handlePromoCodeSubmit} courseId={courseId} />
+                
+                {/* Emergency debug access check */}
+                <div className="mt-4 text-center">
+                  <button
+                    onClick={async () => {
+                      try {
+                        const token = localStorage.getItem('token');
+                        if (!token) {
+                          alert('You need to be logged in to perform a debug check');
+                          return;
+                        }
+                        
+                        console.log('Performing emergency access check for course:', courseId);
+                        const response = await fetch('/api/debug/access', {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${token}`,
+                          },
+                          body: JSON.stringify({ courseId }),
+                        });
+                        
+                        const data = await response.json();
+                        console.log('Debug access check result:', data);
+                        
+                        if (data.diagnostics?.shouldHaveAccess) {
+                          // User should have access, attempt to fix it
+                          const fixResponse = await fetch('/api/debug/fix-access', {
+                            method: 'POST',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              Authorization: `Bearer ${token}`,
+                            },
+                            body: JSON.stringify({ courseId }),
+                          });
+                          
+                          const fixData = await fixResponse.json();
+                          console.log('Fix result:', fixData);
+                          
+                          if (fixData.fixApplied || fixData.alreadyHadAccess) {
+                            alert(`Access fixed for course "${fixData.courseName || courseId}"! Refreshing page...`);
+                            window.location.reload();
+                          } else if (fixData.error) {
+                            alert(`Could not fix access: ${fixData.error}`);
+                          } else {
+                            alert(`Access check shows you should have access. Please try refreshing the page.`);
+                            window.location.reload();
+                          }
+                        } else {
+                          alert(`Debug info: No access detected. Please try activating the promo code again.`);
+                        }
+                      } catch (err) {
+                        console.error('Debug access check error:', err);
+                        alert('Error checking access. See console for details.');
+                      }
+                    }}
+                    className="text-sm text-primary underline hover:no-underline"
+                  >
+                    Having trouble? Click here to check access
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="bg-background-light rounded-lg p-6">
